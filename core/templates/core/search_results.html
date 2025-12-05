@@ -1,0 +1,32 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Результаты поиска{% endblock %}
+
+{% block content %}
+<section class="search-results">
+    <h1>Результаты поиска</h1>
+
+    {% if query %}
+        <p class="search-query">Запрос: <strong>{{ query }}</strong></p>
+    {% else %}
+        <p class="search-query">Пустой запрос.</p>
+    {% endif %}
+
+    {% if results %}
+        <div class="cards">
+            {% for song in results %}
+                <a href="{% url 'song_detail' song.id %}" class="card">
+                    <h2 class="card-title">{{ song.title }}</h2>
+                    <p class="card-artist">{{ song.artist }}</p>
+                    <p class="card-genre">{{ song.genre }}</p>
+                    <p class="card-preview">
+                        {{ song.lyrics_en.0 }}
+                    </p>
+                </a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>Ничего не найдено.</p>
+    {% endif %}
+</section>
+{% endblock %}

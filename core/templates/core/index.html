@@ -1,0 +1,28 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Sound2Mean — поиск песен{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>Найди и пойми любимую песню</h1>
+
+    <form action="{% url 'search' %}" method="get" class="search-form">
+        <input type="text"
+               name="q"
+               placeholder="Введите название песни или исполнителя"
+               required>
+        <button type="submit">Найти</button>
+    </form>
+
+    {% if last_queries %}
+        <div class="recent-searches">
+            <h3>Недавние запросы:</h3>
+            <ul>
+                {% for q in last_queries %}
+                    <li>{{ q }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}
