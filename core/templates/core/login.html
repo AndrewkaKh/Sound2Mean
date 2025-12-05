@@ -1,0 +1,28 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Вход через Telegram{% endblock %}
+
+{% block content %}
+<section class="auth">
+    <h1>Вход через Telegram</h1>
+    <p class="auth-description">
+        На этом этапе делаем упрощённый вход: введите ваш Telegram username
+        и тестовый код <strong>1234</strong>.
+    </p>
+
+    <form method="post" class="auth-form">
+        {% csrf_token %}
+        <label for="id_username">Telegram username</label>
+        <input id="id_username" type="text" name="username" placeholder="@username">
+
+        <label for="id_code">Код из Telegram (1234)</label>
+        <input id="id_code" type="text" name="code" placeholder="1234">
+
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% endif %}
+
+        <button type="submit">Войти</button>
+    </form>
+</section>
+{% endblock %}

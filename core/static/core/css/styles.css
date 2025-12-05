@@ -1,0 +1,299 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: radial-gradient(circle at top, #222 0, #050505 60%);
+    color: #f5f5f5;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    background: rgba(0, 0, 0, 0.9);
+    border-bottom: 1px solid #333;
+}
+
+.logo a {
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    font-size: 20px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.username {
+    opacity: 0.8;
+}
+
+.btn, .btn-secondary {
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 14px;
+    border: 1px solid #555;
+    cursor: pointer;
+    display: inline-block;
+}
+
+.btn {
+    background: #e91e63;
+    border-color: #e91e63;
+}
+
+.btn:hover {
+    opacity: 0.9;
+}
+
+.btn-secondary {
+    background: transparent;
+    border-color: #555;
+}
+
+.btn-secondary:hover {
+    background: #222;
+}
+
+.main {
+    padding: 40px 20px;
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+.hero {
+    text-align: center;
+    margin-top: 60px;
+}
+
+.hero h1 {
+    font-size: 32px;
+    margin-bottom: 32px;
+}
+
+.search-form {
+    display: flex;
+    max-width: 560px;
+    margin: 0 auto;
+    gap: 8px;
+}
+
+.search-form input[type="text"] {
+    flex: 1;
+    padding: 12px 16px;
+    border-radius: 999px;
+    border: 1px solid #444;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    outline: none;
+}
+
+.search-form button {
+    padding: 12px 20px;
+    border-radius: 999px;
+    border: none;
+    background: #e91e63;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.search-form button:hover {
+    opacity: 0.9;
+}
+
+.recent-searches {
+    margin-top: 32px;
+    text-align: left;
+    max-width: 560px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.recent-searches ul {
+    list-style: none;
+    padding-left: 0;
+    margin-top: 8px;
+}
+
+.recent-searches li {
+    opacity: 0.8;
+}
+
+.auth {
+    max-width: 480px;
+    margin: 40px auto;
+}
+
+.auth-description {
+    opacity: 0.9;
+}
+
+.auth-form {
+    margin-top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.auth-form label {
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.auth-form input {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid #444;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    outline: none;
+}
+
+.auth-form button {
+    margin-top: 8px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: none;
+    background: #e91e63;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.auth-form button:hover {
+    opacity: 0.9;
+}
+
+.error {
+    color: #ff6b6b;
+    font-size: 14px;
+}
+
+.search-results h1 {
+    margin-bottom: 12px;
+}
+
+.search-query {
+    opacity: 0.8;
+    margin-bottom: 24px;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+}
+
+.card {
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid #333;
+    transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.1s ease;
+}
+
+.card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.6);
+    border-color: #e91e63;
+}
+
+.card-title {
+    font-size: 18px;
+    margin: 0 0 4px;
+}
+
+.card-artist {
+    opacity: 0.8;
+    margin: 0 0 4px;
+}
+
+.card-genre {
+    font-size: 12px;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+}
+
+.card-preview {
+    font-size: 13px;
+    opacity: 0.9;
+}
+
+.song-page {
+    margin-top: 10px;
+}
+
+.song-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.song-artist {
+    opacity: 0.8;
+    margin-top: 4px;
+}
+
+.song-genre {
+    font-size: 12px;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 4px;
+}
+
+.song-layout {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+}
+
+.song-column {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 16px;
+    padding: 16px;
+    border: 1px solid #333;
+}
+
+.song-column h2 {
+    font-size: 18px;
+    margin-top: 0;
+    margin-bottom: 12px;
+}
+
+.line-pair {
+    margin-bottom: 6px;
+}
+
+.line-en,
+.line-ru {
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+@media (max-width: 768px) {
+    .song-layout {
+        flex-direction: column;
+    }
+
+    .hero {
+        margin-top: 30px;
+    }
+}

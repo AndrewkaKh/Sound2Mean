@@ -1,0 +1,29 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Sound2Mean{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'core/css/styles.css' %}">
+</head>
+<body>
+<header class="header">
+    <div class="logo">
+        <a href="{% url 'index' %}">Sound2Mean</a>
+    </div>
+    <div class="header-right">
+        {% if request.session.tg_username %}
+            <span class="username">@{{ request.session.tg_username }}</span>
+            <a class="btn" href="{% url 'logout' %}">Выйти</a>
+        {% else %}
+            <a class="btn" href="{% url 'login' %}">Войти через Telegram</a>
+        {% endif %}
+    </div>
+</header>
+
+<main class="main">
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>

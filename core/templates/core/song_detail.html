@@ -1,0 +1,38 @@
+{% extends 'core/base.html' %}
+
+{% block title %}{{ song.title }} — {{ song.artist }}{% endblock %}
+
+{% block content %}
+<section class="song-page">
+    <div class="song-header">
+        <div>
+            <h1>{{ song.title }}</h1>
+            <p class="song-artist">{{ song.artist }}</p>
+            <p class="song-genre">{{ song.genre }}</p>
+        </div>
+        <div>
+            <a href="{% url 'search' %}?q={{ song.title }}" class="btn-secondary">← Назад к поиску</a>
+        </div>
+    </div>
+
+    <div class="song-layout">
+        <div class="song-column song-column-en">
+            <h2>Оригинал</h2>
+            {% for en, ru in lines %}
+                <div class="line-pair">
+                    <div class="line-en">{{ en }}</div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="song-column song-column-ru">
+            <h2>Перевод</h2>
+            {% for en, ru in lines %}
+                <div class="line-pair">
+                    <div class="line-ru">{{ ru }}</div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}
