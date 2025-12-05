@@ -1,0 +1,14 @@
+# Виртуальное окружение
+venv/
+.venv/
+
+# Python кеш
+__pycache__/
+*.py[cod]
+
+# Django база данных (локальная)
+db.sqlite3
+*.sqlite3
+
+# Логи (если будут)
+*.log
