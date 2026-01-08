@@ -4,6 +4,10 @@
 
 {% block content %}
 <section class="search-results">
+    <a href="{% url 'index' %}" class="btn-secondary">
+        ← Вернуться к поиску
+    </a>
+
     <h1>Результаты поиска</h1>
 
     {% if query %}
