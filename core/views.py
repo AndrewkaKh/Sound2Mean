@@ -1,5 +1,8 @@
 from django.shortcuts import render, redirect
 from django.http import Http404
+from .services.lyrics_service import search_candidates, get_song
+import requests
+from django.core.cache import cache
 
 SONGS = [
     {
@@ -85,7 +88,7 @@ def login_view(request):
         elif code != "1234":
             error = "Неверный код (для теста используйте 1234)."
         else:
-            request.session["tg_username"] = username
+            request.session["tg_username"] = username[1::]
             return redirect("index")
 
     return render(request, "core/login.html", {"error": error})
@@ -98,44 +101,89 @@ def logout_view(request):
 
 
 def search(request):
-    """
-    Результаты поиска по локальному списку SONGS.
-    Ищем по названию или исполнителю.
-    """
-    query = request.GET.get("q", "").strip()
-    results = []
+    query = (request.GET.get("q") or "").strip()
 
-    if query:
-        q_lower = query.lower()
-        for song in SONGS:
-            if q_lower in song["title"].lower() or q_lower in song["artist"].lower():
-                results.append(song)
+    # optional: если есть отдельные поля (можешь добавить позже на фронте)
+    artist = (request.GET.get("artist") or "").strip()
+    track_name = (request.GET.get("track_name") or "").strip()
 
-        last_queries = request.session.get("last_queries", [])
-        if query not in last_queries:
-            last_queries.insert(0, query)
-            last_queries = last_queries[:5]
-            request.session["last_queries"] = last_queries
+    # если у тебя один инпут, удобно поддержать формат: "Queen - We Will Rock You"
+    if not artist and not track_name and " - " in query:
+        left, right = query.split(" - ", 1)
+        artist = left.strip()
+        track_name = right.strip()
 
-    context = {
+    results = search_candidates(
+        q=query or None,
+        artist=artist or None,
+        track_name=track_name or None,
+        limit=5,
+    )
+    
+    for s in results:
+        sid = s.get("id")
+        if not sid:
+            continue
+        cache.set(
+            f"s2m:song:{sid}",
+            {
+                "id": sid,
+                "title": s.get("title"),
+                "artist": s.get("artist"),
+                "album": s.get("album"),
+                "duration": s.get("duration"),
+                "plainLyrics": s.get("_plainLyrics") or "",
+                "syncedLyrics": s.get("_syncedLyrics") or "",
+            },
+            60 * 30,  # 30 минут
+        )
+    
+    # сохраняем историю (как раньше)
+    last_queries = request.session.get("last_queries", [])
+    if query and query not in last_queries:
+        last_queries.insert(0, query)
+        request.session["last_queries"] = last_queries[:5]
+
+    return render(request, "core/search_results.html", {
         "query": query,
         "results": results,
-    }
-    return render(request, "core/search_results.html", context)
+    })
 
 
 def song_detail(request, song_id: int):
-    """
-    Страница песни: слева английский текст, справа русский перевод.
-    """
-    song = next((s for s in SONGS if s["id"] == song_id), None)
+    # 1) Сначала пробуем из кэша (после поиска)
+    cached = cache.get(f"s2m:song:{song_id}")
+    if cached and (cached.get("plainLyrics") or cached.get("syncedLyrics")):
+        lyrics_en = (cached.get("plainLyrics") or cached.get("syncedLyrics") or "").splitlines()
+        # Перевода пока нет — заполним пустыми строками, чтобы layout был 1:1
+        lyrics_ru = [""] * len(lyrics_en)
+        lines = list(zip(lyrics_en, lyrics_ru))
+        return render(request, "core/song_detail.html", {
+            "song": cached,
+            "lines": lines,  # как у вас было раньше
+            "provider_error": None,
+        })
+
+    # 2) Если кэша нет (пользователь открыл прямую ссылку) — fallback на LRCLIB /get
+    try:
+        song = get_song(song_id)
+    except requests.exceptions.RequestException as e:
+        # ВАЖНО: не ломаем страницу, но и формат не меняем
+        # Покажем ошибку и пустые колонки
+        return render(request, "core/song_detail.html", {
+            "song": {"title": "Провайдер недоступен", "artist": "", "album": "", "duration": None},
+            "lines": [],
+            "provider_error": f"{type(e).__name__}: {e}",
+        })
+
     if not song:
         raise Http404("Song not found")
 
-    lines = list(zip(song["lyrics_en"], song["lyrics_ru"]))
-
-    context = {
+    lyrics_en = (song.get("plainLyrics") or song.get("syncedLyrics") or "").splitlines()
+    lyrics_ru = [""] * len(lyrics_en)
+    lines = list(zip(lyrics_en, lyrics_ru))
+    return render(request, "core/song_detail.html", {
         "song": song,
         "lines": lines,
-    }
-    return render(request, "core/song_detail.html", context)
+        "provider_error": None,
+    })

@@ -429,3 +429,56 @@ a {
         align-items: flex-start;
     }
 }
+
+/* === Sound2Mean lyrics 2-column layout (unique classes to avoid conflicts) === */
+.s2m-lyrics-layout {
+  margin-top: 18px;
+}
+
+.s2m-lyrics-head {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 24px !important;
+  margin: 18px 0 12px;
+}
+
+.s2m-lyrics-head__col {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.s2m-lyrics-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.s2m-lyrics-row {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 24px !important;
+  align-items: start !important;
+}
+
+.s2m-lyrics-cell {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.s2m-lyrics-cell--ru {
+  opacity: 0.9;
+}
+
+@media (max-width: 900px) {
+  .s2m-lyrics-head,
+  .s2m-lyrics-row {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+.s2m-error-box {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 10px;
+}

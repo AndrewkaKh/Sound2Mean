@@ -3,34 +3,41 @@
 {% block title %}Результаты поиска{% endblock %}
 
 {% block content %}
-<section class="search-results">
-    <a href="{% url 'index' %}" class="btn-secondary">
-        ← Вернуться к поиску
-    </a>
+  <section class="search-results">
+    <a class="btn-secondary" href="{% url 'index' %}">← Вернуться к поиску</a>
 
-    <h1>Результаты поиска</h1>
+    <h1 style="margin-top: 18px;">Результаты поиска</h1>
 
     {% if query %}
-        <p class="search-query">Запрос: <strong>{{ query }}</strong></p>
+      <div class="search-query">Запрос: <strong>{{ query }}</strong></div>
     {% else %}
-        <p class="search-query">Пустой запрос.</p>
+      <div class="search-query">Пустой запрос.</div>
     {% endif %}
 
     {% if results %}
-        <div class="cards">
-            {% for song in results %}
-                <a href="{% url 'song_detail' song.id %}" class="card">
-                    <h2 class="card-title">{{ song.title }}</h2>
-                    <p class="card-artist">{{ song.artist }}</p>
-                    <p class="card-genre">{{ song.genre }}</p>
-                    <p class="card-preview">
-                        {{ song.lyrics_en.0 }}
-                    </p>
-                </a>
-            {% endfor %}
-        </div>
+      <div class="cards">
+        {% for s in results %}
+          <a class="card" href="{% url 'song_detail' s.id %}">
+            <h3 class="card-title">{{ s.title }}</h3>
+            <div class="card-artist">{{ s.artist }}</div>
+
+            {# album используем как "жанр/метку", чтобы не ломать дизайн #}
+            {% if s.album %}
+              <div class="card-genre">{{ s.album }}</div>
+            {% else %}
+              <div class="card-genre">lyrics</div>
+            {% endif %}
+
+            {% if s.preview %}
+              <div class="card-preview">{{ s.preview }}</div>
+            {% else %}
+              <div class="card-preview">Превью текста недоступно</div>
+            {% endif %}
+          </a>
+        {% endfor %}
+      </div>
     {% else %}
-        <p>Ничего не найдено.</p>
+      <p style="margin-top: 18px;">Ничего не найдено.</p>
     {% endif %}
-</section>
+  </section>
 {% endblock %}
