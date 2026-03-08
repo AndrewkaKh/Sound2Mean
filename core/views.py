@@ -1,8 +1,14 @@
-from django.shortcuts import render, redirect
-from django.http import Http404
-from .services.lyrics_service import search_candidates, get_song
-import requests
+from django.conf import settings
+from django.contrib import messages
 from django.core.cache import cache
+from django.http import Http404
+from django.shortcuts import redirect, render
+import requests
+
+from .services.lyrics_service import get_song, search_candidates
+from .services.login_code import verify_code
+from .services.telegram_bot import TelegramBotError
+from .services.telegram_users import find_by_username, send_login_code
 
 SONGS = [
     {
@@ -71,32 +77,72 @@ def index(request):
     return render(request, "core/index.html", context)
 
 
+def _save_telegram_session(request, payload: dict) -> None:
+    request.session["tg_user"] = payload
+    request.session.pop("tg_username", None)
+    request.session.modified = True
+
+
 def login_view(request):
-    """
-    Псевдо-логин через Telegram:
-    пользователь вводит username и код.
-    Для КТ1 считаем, что код всегда 1234.
-    """
-    error = None
+    if request.session.get("tg_user"):
+        return redirect("index")
+
+    username_value = ""
+    code_sent = bool(request.session.get("login_code_pending"))
 
     if request.method == "POST":
-        username = request.POST.get("username", "").strip()
+        action = request.POST.get("action", "")
+        username_value = request.POST.get("username", "")
         code = request.POST.get("code", "").strip()
 
-        if not username or not code:
-            error = "Заполните оба поля."
-        elif code != "1234":
-            error = "Неверный код (для теста используйте 1234)."
+        if not settings.TELEGRAM_BOT_TOKEN:
+            messages.error(request, "Задайте TELEGRAM_BOT_TOKEN в .env")
+        elif action == "send_code":
+            user = find_by_username(username_value)
+            if not user:
+                messages.error(request, "Сначала откройте бота и отправьте /start")
+            else:
+                try:
+                    send_login_code(user)
+                    request.session["login_code_pending"] = True
+                    code_sent = True
+                    messages.success(request, "Код отправлен в Telegram.")
+                except TelegramBotError as e:
+                    messages.error(request, str(e))
+        elif action == "login":
+            user = find_by_username(username_value)
+            if not user:
+                messages.error(request, "Пользователь не найден. Сначала /start в боте.")
+            elif not verify_code(user.telegram_id, code):
+                messages.error(request, "Неверный или просроченный код.")
+            else:
+                _save_telegram_session(
+                    request,
+                    {
+                        "id": user.telegram_id,
+                        "username": user.username,
+                        "display_name": user.display_name,
+                    },
+                )
+                request.session.pop("login_code_pending", None)
+                messages.success(request, f"Добро пожаловать, {user.display_name}!")
+                return redirect("index")
         else:
-            request.session["tg_username"] = username[1::]
-            return redirect("index")
+            messages.error(request, "Неизвестное действие.")
 
-    return render(request, "core/login.html", {"error": error})
+    return render(
+        request,
+        "core/login.html",
+        {"username_value": username_value, "code_sent": code_sent},
+    )
 
 
 def logout_view(request):
-    """Выход — просто очищаем username из сессии."""
+    request.session.pop("tg_user", None)
     request.session.pop("tg_username", None)
+    request.session.pop("login_code_pending", None)
+    request.session.modified = True
+    messages.info(request, "Вы вышли из аккаунта.")
     return redirect("index")
 
 

@@ -1,28 +1,53 @@
 {% extends 'core/base.html' %}
 
-{% block title %}Вход через Telegram{% endblock %}
+{% block title %}Вход через Telegram — Sound2Mean{% endblock %}
 
 {% block content %}
 <section class="auth">
     <h1>Вход через Telegram</h1>
-    <p class="auth-description">
-        На этом этапе делаем упрощённый вход: введите ваш Telegram username
-        и тестовый код <strong>1234</strong>.
-    </p>
 
-    <form method="post" class="auth-form">
-        {% csrf_token %}
-        <label for="id_username">Telegram username</label>
-        <input id="id_username" type="text" name="username" placeholder="@username">
+    {% if telegram_bot_configured %}
+        <ol class="auth-steps">
+            <li>
+                Откройте бота
+                {% if telegram_bot_url %}
+                    <a href="{{ telegram_bot_url }}" target="_blank" rel="noopener">@{{ telegram_bot_username }}</a>
+                {% endif %}
+                и отправьте <strong>/start</strong>
+            </li>
+            <li>Укажите @username и нажмите «Получить код»</li>
+            <li>Введите код из бота и войдите</li>
+        </ol>
 
-        <label for="id_code">Код из Telegram (1234)</label>
-        <input id="id_code" type="text" name="code" placeholder="1234">
+        <form method="post" class="auth-form">
+            {% csrf_token %}
+            <label for="id_username">Telegram @username</label>
+            <input id="id_username" type="text" name="username"
+                   value="{{ username_value }}"
+                   placeholder="@username" required>
 
-        {% if error %}
-            <p class="error">{{ error }}</p>
-        {% endif %}
+            <label for="id_code">Код из бота</label>
+            <input id="id_code" type="text" name="code"
+                   placeholder="123456" inputmode="numeric" autocomplete="one-time-code"
+                   {% if not code_sent %}disabled{% endif %}>
 
-        <button type="submit">Войти</button>
-    </form>
+            <div class="auth-actions">
+                <button type="submit" name="action" value="send_code" class="btn-secondary">
+                    Получить код
+                </button>
+                <button type="submit" name="action" value="login">Войти</button>
+            </div>
+        </form>
+    {% else %}
+        <div class="auth-setup">
+            <p>Задайте в <code>.env</code>:</p>
+            <ul>
+                <li><code>TELEGRAM_BOT_TOKEN</code></li>
+                <li><code>TELEGRAM_BOT_USERNAME</code> — ссылка на бота</li>
+            </ul>
+        </div>
+    {% endif %}
+
+    <a class="btn-secondary auth-back" href="{% url 'index' %}">← На главную</a>
 </section>
 {% endblock %}
