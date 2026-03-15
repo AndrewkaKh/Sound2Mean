@@ -1,11 +1,14 @@
 from django.conf import settings
 from django.contrib import messages
 from django.core.cache import cache
+from django.db import DatabaseError
 from django.http import Http404
 from django.shortcuts import redirect, render
 import requests
 
-from .services.lyrics_service import get_song, parse_artist_title_query, search_candidates
+from .models import TelegramUser
+from .services.lyrics_service import consume_last_provider_error, get_song, parse_artist_title_query, search_candidates
+from .services.search_history import get_recent_queries_for_user, save_user_query
 from .services.login_code import verify_code
 from .services.telegram_bot import TelegramBotError
 from .services.telegram_users import find_by_username, send_login_code
@@ -69,7 +72,8 @@ SONGS = [
 
 
 def index(request):
-    last_queries = request.session.get("last_queries", [])
+    telegram_user = _get_current_telegram_user(request)
+    last_queries = get_recent_queries_for_user(telegram_user) if telegram_user else []
     context = {
         "last_queries": last_queries,
     }
@@ -80,6 +84,18 @@ def _save_telegram_session(request, payload: dict) -> None:
     request.session["tg_user"] = payload
     request.session.pop("tg_username", None)
     request.session.modified = True
+
+
+def _get_current_telegram_user(request) -> TelegramUser | None:
+    payload = request.session.get("tg_user") or {}
+    telegram_id = payload.get("id")
+    if not telegram_id:
+        return None
+
+    try:
+        return TelegramUser.objects.filter(telegram_id=telegram_id).first()
+    except DatabaseError:
+        return None
 
 
 def login_view(request):
@@ -161,6 +177,9 @@ def search(request):
         track_name=track_name or None,
         limit=5,
     )
+    provider_error = consume_last_provider_error()
+    if provider_error is not None:
+        messages.error(request, "Сервис поиска текстов временно недоступен. Попробуйте позже.")
 
     for song in results:
         song_id = song.get("id")
@@ -180,10 +199,18 @@ def search(request):
             60 * 30,
         )
 
-    last_queries = request.session.get("last_queries", [])
-    if query and query not in last_queries:
-        last_queries.insert(0, query)
-        request.session["last_queries"] = last_queries[:5]
+    telegram_user = _get_current_telegram_user(request)
+    if telegram_user:
+        save_user_query(telegram_user, query)
+    else:
+        last_queries = request.session.get("last_queries", [])
+        normalized_query = " ".join(query.lower().split())
+        normalized_history = {" ".join(item.lower().split()): item for item in last_queries}
+        if normalized_query:
+            if normalized_query in normalized_history:
+                last_queries = [item for item in last_queries if " ".join(item.lower().split()) != normalized_query]
+            last_queries.insert(0, " ".join(query.split()))
+            request.session["last_queries"] = last_queries[:5]
 
     return render(
         request,

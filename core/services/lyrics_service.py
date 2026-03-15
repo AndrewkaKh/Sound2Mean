@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import re
+from contextvars import ContextVar
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
 from django.core.cache import cache
 
-from .providers.lrclib import LrcLibClient
+from .providers.lrclib import LRCLibError, LrcLibClient
 
 _lrclib = LrcLibClient(timeout=(3.0, 15.0), user_agent="Sound2Mean/0.1")
+_last_provider_error: ContextVar[Optional[LRCLibError]] = ContextVar("last_lyrics_provider_error", default=None)
 
 SEARCH_TTL_SECONDS = 60 * 30
 SEARCH_LYRICS_TTL_SECONDS = 60 * 30
@@ -42,6 +44,20 @@ def _norm(value: str) -> str:
     value = (value or "").strip()
     value = re.sub(r"\s+", " ", value)
     return value
+
+
+def _set_last_provider_error(error: Optional[LRCLibError]) -> None:
+    _last_provider_error.set(error)
+
+
+def get_last_provider_error() -> Optional[LRCLibError]:
+    return _last_provider_error.get()
+
+
+def consume_last_provider_error() -> Optional[LRCLibError]:
+    error = _last_provider_error.get()
+    _last_provider_error.set(None)
+    return error
 
 
 def normalize_search_text(text: str, *, strip_parenthetical: bool = False) -> str:
@@ -549,6 +565,7 @@ def search_candidates(
     limit: int = 10,
     cache_lyrics_top: int = 5,
 ) -> List[Dict[str, Any]]:
+    _set_last_provider_error(None)
     limit = max(1, min(int(limit), 25))
     candidates_key, lyrics_map_key = _search_cache_keys(q, artist, track_name, limit)
 
@@ -562,23 +579,10 @@ def search_candidates(
         track_name=track_name,
     )
 
-    pool: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    _collect_search_results(primary_attempts, pool)
+    try:
+        pool: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        _collect_search_results(primary_attempts, pool)
 
-    top = _rank_raw_results(
-        pool,
-        limit=limit,
-        query=context["query"],
-        query_search=context["query_search"],
-        artist_query=context["artist_query"],
-        track_query=context["track_query"],
-        strict_artist_title=bool(context["strict_artist_title"]),
-    )
-
-    best_score = top[0][0] if top else 0.0
-    needs_fallback = not top or len(top) < limit or best_score < 0.72
-    if needs_fallback and fallback_attempts:
-        _collect_search_results(fallback_attempts, pool)
         top = _rank_raw_results(
             pool,
             limit=limit,
@@ -588,6 +592,23 @@ def search_candidates(
             track_query=context["track_query"],
             strict_artist_title=bool(context["strict_artist_title"]),
         )
+ 
+        best_score = top[0][0] if top else 0.0
+        needs_fallback = not top or len(top) < limit or best_score < 0.72
+        if needs_fallback and fallback_attempts:
+            _collect_search_results(fallback_attempts, pool)
+            top = _rank_raw_results(
+                pool,
+                limit=limit,
+                query=context["query"],
+                query_search=context["query_search"],
+                artist_query=context["artist_query"],
+                track_query=context["track_query"],
+                strict_artist_title=bool(context["strict_artist_title"]),
+            )
+    except LRCLibError as exc:
+        _set_last_provider_error(exc)
+        return []
 
     candidates = [_simplify_candidate(item, score) for score, item in top]
 

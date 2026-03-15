@@ -1,10 +1,13 @@
 from unittest.mock import patch
 
+import requests
 from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 
+from .models import SearchHistory, TelegramUser
 from .services.lyrics_service import normalize_search_text, parse_artist_title_query, search_candidates
+from .services.search_history import normalize_history_query
 
 
 def _lrclib_item(
@@ -48,6 +51,9 @@ class LyricsSearchServiceTests(TestCase):
             {"artist": "Queen", "track_name": "Bohemian Rhapsody"},
         )
         self.assertIsNone(parse_artist_title_query("AC-DC Thunderstruck"))
+
+    def test_normalize_history_query_collapses_spaces_and_case(self):
+        self.assertEqual(normalize_history_query("  Beatles   Help "), "beatles help")
 
     @patch("core.services.lyrics_service._lrclib.search")
     def test_fuzzy_ranking_prefers_relevant_song(self, mock_search):
@@ -124,7 +130,7 @@ class LyricsSearchServiceTests(TestCase):
     def test_artist_title_query_prioritizes_artist_match_for_queen_bohem(self, mock_search):
         mock_search.return_value = [
             _lrclib_item(track_id=31, title="Bohem", artist="Dipnot"),
-            _lrclib_item(track_id=32, title="Bohém", artist="Nerieš"),
+            _lrclib_item(track_id=32, title="Bohem", artist="Neries"),
             _lrclib_item(track_id=33, title="Bohemian Rhapsody", artist="Queen"),
         ]
 
@@ -183,6 +189,129 @@ class LyricsSearchServiceTests(TestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual({result["artist"] for result in results}, {"Dipnot", "Queen"})
 
+    @patch("core.services.providers.lrclib.requests.Session.get")
+    def test_connection_error_does_not_break_search_candidates(self, mock_get):
+        mock_get.side_effect = requests.exceptions.ConnectionError("Failed to resolve 'lrclib.net'")
+
+        results = search_candidates(q="beatles help", artist=None, limit=5)
+
+        self.assertEqual(results, [])
+
+
+class BaseTelegramAuthTestCase(TestCase):
+    def create_telegram_user(self, telegram_id: int, username: str) -> TelegramUser:
+        return TelegramUser.objects.create(telegram_id=telegram_id, username=username)
+
+    def login_telegram_user(self, user: TelegramUser) -> None:
+        session = self.client.session
+        session["tg_user"] = {
+            "id": user.telegram_id,
+            "username": user.username,
+            "display_name": user.display_name,
+        }
+        session.save()
+
+
+class SearchHistoryTests(BaseTelegramAuthTestCase):
+    @patch("core.views.search_candidates")
+    def test_authenticated_user_gets_search_history_record(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+        user = self.create_telegram_user(1, "alice")
+        self.login_telegram_user(user)
+
+        self.client.get(reverse("search"), {"q": "beatles help"})
+
+        history = SearchHistory.objects.get(user=user)
+        self.assertEqual(history.query, "beatles help")
+        self.assertEqual(history.normalized_query, "beatles help")
+
+    @patch("core.views.search_candidates")
+    def test_anonymous_user_does_not_create_database_history(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+
+        self.client.get(reverse("search"), {"q": "beatles help"})
+
+        self.assertEqual(SearchHistory.objects.count(), 0)
+        self.assertEqual(self.client.session.get("last_queries"), ["beatles help"])
+
+    @patch("core.views.search_candidates")
+    def test_repeated_query_with_different_case_does_not_create_duplicate(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+        user = self.create_telegram_user(2, "bob")
+        self.login_telegram_user(user)
+
+        self.client.get(reverse("search"), {"q": "Beatles Help"})
+        self.client.get(reverse("search"), {"q": "  beatles   help "})
+
+        history = SearchHistory.objects.filter(user=user)
+        self.assertEqual(history.count(), 1)
+        self.assertEqual(history.first().query, "beatles help")
+
+    @patch("core.views.search_candidates")
+    def test_user_history_keeps_only_five_latest_unique_queries(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+        user = self.create_telegram_user(3, "carol")
+        self.login_telegram_user(user)
+
+        for query in ["one", "two", "three", "four", "five", "six"]:
+            self.client.get(reverse("search"), {"q": query})
+
+        history = list(SearchHistory.objects.filter(user=user).order_by("-created_at", "-id").values_list("query", flat=True))
+        self.assertEqual(history, ["six", "five", "four", "three", "two"])
+
+    @patch("core.views.search_candidates")
+    def test_history_of_user_a_is_not_visible_to_user_b(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+        user_a = self.create_telegram_user(4, "dave")
+        user_b = self.create_telegram_user(5, "erin")
+
+        self.login_telegram_user(user_a)
+        self.client.get(reverse("search"), {"q": "beatles help"})
+
+        self.client = self.client_class()
+        self.login_telegram_user(user_b)
+        response = self.client.get(reverse("index"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "beatles help")
+
+    @patch("core.views.search_candidates")
+    def test_index_shows_recent_queries_for_current_user(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+        user = self.create_telegram_user(6, "frank")
+        self.login_telegram_user(user)
+
+        self.client.get(reverse("search"), {"q": "beatles help"})
+        self.client.get(reverse("search"), {"q": "queen bohemian"})
+        response = self.client.get(reverse("index"))
+
+        self.assertContains(response, "Последние запросы:")
+        self.assertContains(response, "beatles help")
+        self.assertContains(response, "queen bohemian")
+        self.assertContains(response, reverse("search") + "?q=beatles%20help")
+
+    @patch("core.views.search_candidates")
+    def test_anonymous_index_does_not_show_recent_queries_block(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+
+        session = self.client.session
+        session["last_queries"] = ["beatles help"]
+        session.save()
+
+        response = self.client.get(reverse("index"))
+
+        self.assertNotContains(response, "Последние запросы:")
+        self.assertNotContains(response, "beatles help")
+
+    @patch("core.views.search_candidates")
+    def test_legacy_session_history_for_anonymous_user_still_works(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+
+        self.client.get(reverse("search"), {"q": "Beatles Help"})
+        self.client.get(reverse("search"), {"q": "  beatles   help "})
+
+        self.assertEqual(self.client.session.get("last_queries"), ["beatles help"])
+
 
 class SearchViewTests(TestCase):
     @patch("core.views.search_candidates")
@@ -199,3 +328,55 @@ class SearchViewTests(TestCase):
             response,
             "Ничего не найдено. Попробуйте указать исполнителя или часть строки из песни.",
         )
+
+    @patch("core.services.providers.lrclib.requests.Session.get")
+    def test_search_page_handles_provider_connection_error(self, mock_get):
+        mock_get.side_effect = requests.exceptions.ConnectionError("Failed to resolve 'lrclib.net'")
+
+        response = self.client.get(reverse("search"), {"q": "beatles help"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Сервис поиска текстов временно недоступен. Попробуйте позже.")
+
+    @patch("core.services.lyrics_service._lrclib.search")
+    def test_search_page_successful_search_still_works(self, mock_search):
+        mock_search.return_value = [
+            _lrclib_item(track_id=71, title="Help!", artist="The Beatles", plain_lyrics="Help, I need somebody")
+        ]
+
+        response = self.client.get(reverse("search"), {"q": "beatles help"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Help!")
+        self.assertContains(response, "The Beatles")
+
+
+class SearchApiTests(TestCase):
+    @patch("core.services.providers.lrclib.requests.Session.get")
+    def test_api_search_returns_controlled_503_on_connection_error(self, mock_get):
+        mock_get.side_effect = requests.exceptions.ConnectionError("Failed to resolve 'lrclib.net'")
+
+        response = self.client.get(reverse("api_lyrics_search"), {"q": "beatles help"})
+
+        self.assertEqual(response.status_code, 503)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "provider_unavailable")
+        self.assertEqual(
+            payload["error"]["message"],
+            "Сервис поиска текстов временно недоступен. Попробуйте позже.",
+        )
+
+    @patch("core.services.lyrics_service._lrclib.search")
+    def test_api_search_successful_search_still_works(self, mock_search):
+        mock_search.return_value = [
+            _lrclib_item(track_id=81, title="Help!", artist="The Beatles", plain_lyrics="Help me if you can")
+        ]
+
+        response = self.client.get(reverse("api_lyrics_search"), {"q": "beatles help"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"][0]["title"], "Help!")
+        self.assertEqual(payload["data"][0]["artist"], "The Beatles")
