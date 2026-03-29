@@ -17,6 +17,30 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _load_env_file() -> None:
+    env_path = BASE_DIR / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ[key] = value
+
+
+_load_env_file()
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -123,3 +147,8 @@ STATIC_URL = 'static/'
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "")
 TELEGRAM_PROXY = os.environ.get("TELEGRAM_PROXY", "").strip()
+TRANSLATION_PROVIDER = os.getenv("TRANSLATION_PROVIDER", "")
+TRANSLATION_TARGET_LANGUAGE = os.getenv("TRANSLATION_TARGET_LANGUAGE", "ru")
+TRANSLATION_TIMEOUT = int(os.getenv("TRANSLATION_TIMEOUT", "20"))
+TRANSLATION_API_KEY = os.getenv("TRANSLATION_API_KEY", "")
+TRANSLATION_MODEL = os.getenv("TRANSLATION_MODEL", "gpt-4o-mini")

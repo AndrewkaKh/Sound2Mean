@@ -542,9 +542,7 @@ a {
 }
 
 .song-layout {
-    display: flex;
-    gap: 22px;
-    align-items: flex-start;
+    display: block;
 }
 
 .song-column {
@@ -563,15 +561,78 @@ a {
     letter-spacing: -0.01em;
 }
 
-.line-pair {
-    margin-bottom: 8px;
+.song-page .lyrics-card {
+    padding: 0;
+    overflow: hidden;
 }
 
-.line-en,
-.line-ru {
-    font-size: 20px;
+.translation-note {
+    margin-bottom: 16px;
+}
+
+.song-page .lyrics-table {
+    width: 100%;
+    max-width: 1200px;
+    display: block;
+}
+
+.song-page .lyrics-table-header,
+.song-page .lyrics-line-pair {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 32px;
+    align-items: start;
+}
+
+.song-page .lyrics-table-header {
+    padding: 18px 24px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.song-page .lyrics-table-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+.song-page .lyrics-line-pair {
+    width: 100%;
+    padding: 14px 24px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.song-page .lyrics-line-pair:last-child {
+    border-bottom: none;
+}
+
+.song-page .lyrics-table-cell {
+    min-width: 0;
+    display: block;
     line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.song-page .lyrics-line-en,
+.song-page .lyrics-line-ru {
+    font-size: 18px;
+    line-height: 1.6;
     color: rgba(255, 255, 255, 0.92);
+    word-break: normal;
+}
+
+.song-page .lyrics-line-ru {
+    color: rgba(255, 255, 255, 0.8);
+    opacity: 0.9;
+}
+
+.song-page .lyrics-empty-state {
+    display: flex;
+    flex-direction: column;
 }
 
 @media (max-width: 768px) {
@@ -611,65 +672,38 @@ a {
         width: 100%;
     }
 
-    .song-layout {
-        flex-direction: column;
-    }
-
     .song-header {
         flex-direction: column;
         align-items: flex-start;
     }
-}
 
-/* === Sound2Mean lyrics 2-column layout (unique classes to avoid conflicts) === */
-.s2m-lyrics-layout {
-  margin-top: 18px;
-}
+    .song-page .lyrics-table-header {
+        display: none;
+    }
 
-.s2m-lyrics-head {
-  display: grid !important;
-  grid-template-columns: 1fr 1fr !important;
-  gap: 24px !important;
-  margin: 18px 0 12px;
-}
+    .song-page .lyrics-line-pair {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 4px;
+        padding: 14px 18px;
+    }
 
-.s2m-lyrics-head__col {
-  font-size: 28px;
-  font-weight: 700;
-}
+    .song-page .lyrics-line-en::before,
+    .song-page .lyrics-line-ru::before {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.52);
+    }
 
-.s2m-lyrics-table {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+    .song-page .lyrics-line-en::before {
+        content: "English line";
+    }
 
-.s2m-lyrics-row {
-  display: grid !important;
-  grid-template-columns: 1fr 1fr !important;
-  gap: 24px !important;
-  align-items: start !important;
-}
-
-.s2m-lyrics-cell {
-  white-space: pre-wrap;
-  line-height: 1.5;
-}
-
-.s2m-lyrics-cell--ru {
-  opacity: 0.9;
-}
-
-@media (max-width: 900px) {
-  .s2m-lyrics-head,
-  .s2m-lyrics-row {
-    grid-template-columns: 1fr !important;
-  }
-}
-
-.s2m-error-box {
-  margin: 12px 0;
-  padding: 10px 12px;
-  border: 1px solid rgba(255,255,255,.25);
-  border-radius: 10px;
+    .song-page .lyrics-line-ru::before {
+        content: "Russian translation";
+        opacity: 0.75;
+    }
 }

@@ -18,30 +18,39 @@
     <p class="error">Провайдер недоступен: {{ provider_error }}</p>
   {% endif %}
 
-  <div class="song-layout">
-    <div class="song-column">
-      <h2>Оригинальный текст</h2>
-      {% if lines %}
-        {% for en, ru in lines %}
-          {% if en %}
-            <div class="line-en">{{ en }}</div>
-          {% else %}
-            <div class="line-en">&nbsp;</div>
-          {% endif %}
-        {% endfor %}
-      {% else %}
-        <div class="muted">Текст не найден.</div>
-      {% endif %}
-    </div>
+  {% if translation_error %}
+    <p class="muted translation-note">{{ translation_error }}</p>
+  {% endif %}
 
-    <div class="song-column">
-      <h2>Перевод</h2>
-      {% if lines %}
-        {% for en, ru in lines %}
-          <div class="line-ru">{% if ru %}{{ ru }}{% else %}—{% endif %}</div>
-        {% endfor %}
+  <div class="song-layout">
+    <div class="song-column lyrics-card">
+      {% if lyrics_lines %}
+        <div class="lyrics-table">
+          <div class="lyrics-table-header" aria-hidden="true">
+            <div class="lyrics-table-cell lyrics-table-cell-en lyrics-table-title">English line</div>
+            <div class="lyrics-table-cell lyrics-table-cell-ru lyrics-table-title">Russian translation</div>
+          </div>
+
+          {% for line in lyrics_lines %}
+            <div class="lyrics-line-pair" data-line-index="{{ line.index }}">
+              <div class="lyrics-table-cell lyrics-line-en">{{ line.en|default:" " }}</div>
+              <div class="lyrics-table-cell lyrics-line-ru">{{ line.ru|default:"—" }}</div>
+            </div>
+          {% endfor %}
+        </div>
       {% else %}
-        <div class="muted">Перевод не найден.</div>
+        <div class="lyrics-empty-state">
+          <div class="lyrics-table">
+            <div class="lyrics-table-header">
+              <div class="lyrics-table-cell lyrics-table-cell-en lyrics-table-title">English line</div>
+              <div class="lyrics-table-cell lyrics-table-cell-ru lyrics-table-title">Russian translation</div>
+            </div>
+            <div class="lyrics-line-pair">
+              <div class="lyrics-table-cell muted">Текст не найден.</div>
+              <div class="lyrics-table-cell muted">Перевод не найден.</div>
+            </div>
+          </div>
+        </div>
       {% endif %}
     </div>
   </div>

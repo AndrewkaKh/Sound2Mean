@@ -1,13 +1,21 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import SearchHistory, TelegramUser
+from .models import SearchHistory, SongTranslation, TelegramUser
 from .services.lyrics_service import normalize_search_text, parse_artist_title_query, search_candidates
 from .services.search_history import normalize_history_query
+from .services.translation_service import (
+    TranslationServiceError,
+    build_aligned_lines,
+    hash_original_text,
+    normalize_translated_lines,
+    split_lyrics_lines,
+    translate_lines_to_russian,
+)
 
 
 def _lrclib_item(
@@ -29,6 +37,105 @@ def _lrclib_item(
         "plainLyrics": plain_lyrics,
         "syncedLyrics": synced_lyrics,
     }
+
+
+def _song_payload(song_id: int = 101, plain_lyrics: str = "I walk a lonely road\n\nThe only one that I have ever known") -> dict:
+    return {
+        "source": "lrclib",
+        "id": song_id,
+        "title": "Boulevard of Broken Dreams",
+        "artist": "Green Day",
+        "album": "American Idiot",
+        "duration": 321,
+        "instrumental": False,
+        "plainLyrics": plain_lyrics,
+        "syncedLyrics": "",
+    }
+
+
+class TranslationServiceTests(TestCase):
+    def test_split_lyrics_lines_preserves_empty_lines(self):
+        self.assertEqual(
+            split_lyrics_lines("Line one\n\nLine two"),
+            ["Line one", "", "Line two"],
+        )
+
+    @override_settings(TRANSLATION_PROVIDER="mock")
+    def test_translate_lines_to_russian_returns_same_number_of_lines(self):
+        source_lines = ["Line one", "", "Line two"]
+
+        translated = translate_lines_to_russian(source_lines)
+
+        self.assertEqual(len(translated), len(source_lines))
+        self.assertEqual(translated[1], "")
+
+    def test_normalize_translated_lines_matches_expected_length(self):
+        self.assertEqual(normalize_translated_lines(["a"], 3), ["a", "", ""])
+
+    @override_settings(TRANSLATION_PROVIDER="")
+    def test_translate_lines_to_russian_raises_soft_error_when_provider_missing(self):
+        with self.assertRaisesMessage(TranslationServiceError, "Перевод пока не настроен"):
+            translate_lines_to_russian(["Line one"])
+
+    @override_settings(TRANSLATION_PROVIDER="deepl", TRANSLATION_API_KEY="")
+    def test_translate_lines_to_russian_requires_api_key_for_real_provider(self):
+        with self.assertRaisesMessage(
+            TranslationServiceError,
+            "Переводчик не настроен: заполните TRANSLATION_API_KEY",
+        ):
+            translate_lines_to_russian(["Line one"])
+
+    @override_settings(
+        TRANSLATION_PROVIDER="openai",
+        TRANSLATION_API_KEY="test-key",
+        TRANSLATION_MODEL="gpt-4o-mini",
+    )
+    @patch("core.services.translation_service.requests.post")
+    def test_translate_lines_to_russian_uses_openai_provider(self, mock_post):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {"x-request-id": "req_123"}
+        mock_response.json.return_value = {
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": '["Строка один", "", "Строка два"]',
+                        }
+                    ],
+                }
+            ]
+        }
+        mock_post.return_value = mock_response
+
+        translated = translate_lines_to_russian(["Line one", "", "Line two"])
+
+        self.assertEqual(translated, ["Строка один", "", "Строка два"])
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(mock_post.call_args.kwargs["json"]["model"], "gpt-4o-mini")
+        self.assertIn("Return only valid JSON", mock_post.call_args.kwargs["json"]["instructions"])
+
+    @override_settings(
+        TRANSLATION_PROVIDER="openai",
+        TRANSLATION_API_KEY="bad-key",
+        TRANSLATION_MODEL="gpt-4o-mini",
+    )
+    @patch("core.services.translation_service.requests.post")
+    def test_translate_lines_to_russian_reports_openai_auth_error(self, mock_post):
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_response.headers = {"x-request-id": "req_401"}
+        mock_response.json.return_value = {"error": {"message": "Invalid API key"}}
+        mock_post.return_value = mock_response
+
+        with self.assertRaisesMessage(
+            TranslationServiceError,
+            "OpenAI API key отклонён. Проверьте TRANSLATION_API_KEY",
+        ):
+            translate_lines_to_russian(["Line one"])
 
 
 class LyricsSearchServiceTests(TestCase):
@@ -311,6 +418,141 @@ class SearchHistoryTests(BaseTelegramAuthTestCase):
         self.client.get(reverse("search"), {"q": "  beatles   help "})
 
         self.assertEqual(self.client.session.get("last_queries"), ["beatles help"])
+
+
+class SongDetailTranslationTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    @override_settings(TRANSLATION_PROVIDER="", TRANSLATION_API_KEY="")
+    @patch("core.views.get_song")
+    def test_song_detail_returns_200_when_translation_is_not_configured(self, mock_get_song):
+        mock_get_song.return_value = _song_payload()
+
+        response = self.client.get(reverse("song_detail", args=[101]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Перевод пока не настроен")
+        self.assertContains(response, "I walk a lonely road")
+        self.assertContains(response, "The only one that I have ever known")
+        self.assertContains(response, 'class="lyrics-table"')
+        self.assertContains(response, 'class="lyrics-table-header"')
+        self.assertContains(response, 'class="lyrics-line-pair"', count=3)
+        self.assertContains(response, 'data-line-index="0"')
+        self.assertContains(response, 'class="lyrics-table-cell lyrics-line-ru">—</div>', count=3)
+
+    @override_settings(TRANSLATION_PROVIDER="", TRANSLATION_API_KEY="")
+    @patch("core.views.get_song")
+    def test_song_detail_shows_english_text_on_translation_error(self, mock_get_song):
+        mock_get_song.return_value = _song_payload()
+
+        response = self.client.get(reverse("song_detail", args=[101]))
+
+        self.assertContains(response, "I walk a lonely road")
+        self.assertContains(response, "The only one that I have ever known")
+
+    @override_settings(TRANSLATION_PROVIDER="mock", TRANSLATION_API_KEY="")
+    @patch("core.views.get_song")
+    def test_song_detail_shows_russian_translation_when_mock_provider_is_enabled(self, mock_get_song):
+        mock_get_song.return_value = _song_payload()
+
+        response = self.client.get(reverse("song_detail", args=[101]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Перевод: I walk a lonely road")
+        self.assertContains(response, "Перевод: The only one that I have ever known")
+        self.assertContains(response, "I walk a lonely road")
+        self.assertContains(response, 'data-line-index="0"')
+        self.assertContains(response, 'class="lyrics-table-header"')
+
+    @override_settings(TRANSLATION_PROVIDER="mock", TRANSLATION_API_KEY="")
+    @patch("core.views.get_song")
+    def test_song_detail_renders_english_and_russian_inside_same_line_pair(self, mock_get_song):
+        mock_get_song.return_value = _song_payload(song_id=102, plain_lyrics="Line one\nLine two")
+
+        response = self.client.get(reverse("song_detail", args=[102]))
+        html = response.content.decode("utf-8")
+
+        self.assertIn(
+            '<div class="lyrics-line-pair" data-line-index="0">\n'
+            '              <div class="lyrics-table-cell lyrics-line-en">Line one</div>\n'
+            '              <div class="lyrics-table-cell lyrics-line-ru">Перевод: Line one</div>\n'
+            '            </div>',
+            html,
+        )
+
+    @patch("core.views.translate_lines_to_russian")
+    @patch("core.views.get_song")
+    def test_translation_is_saved_in_song_translation(self, mock_get_song, mock_translate):
+        plain_lyrics = "I walk a lonely road\nThe only one that I have ever known"
+        mock_get_song.return_value = _song_payload(plain_lyrics=plain_lyrics)
+        mock_translate.return_value = ["Я иду по одинокой дороге", "Единственная, которую я когда-либо знал"]
+
+        self.client.get(reverse("song_detail", args=[101]))
+
+        translation = SongTranslation.objects.get(source="lrclib", external_id="101", language="ru")
+        self.assertEqual(translation.original_hash, hash_original_text(plain_lyrics))
+        self.assertEqual(
+            translation.aligned_lines,
+            build_aligned_lines(
+                split_lyrics_lines(plain_lyrics),
+                ["Я иду по одинокой дороге", "Единственная, которую я когда-либо знал"],
+            ),
+        )
+
+    @patch("core.views.translate_lines_to_russian")
+    @patch("core.views.get_song")
+    def test_repeated_song_detail_uses_cached_translation(self, mock_get_song, mock_translate):
+        plain_lyrics = "I walk a lonely road\nThe only one that I have ever known"
+        mock_get_song.return_value = _song_payload(plain_lyrics=plain_lyrics)
+        mock_translate.return_value = ["Я иду по одинокой дороге", "Единственная, которую я когда-либо знал"]
+
+        self.client.get(reverse("song_detail", args=[101]))
+        self.client.get(reverse("song_detail", args=[101]))
+
+        self.assertEqual(mock_translate.call_count, 1)
+
+    @patch("core.views.translate_lines_to_russian")
+    @patch("core.views.get_song")
+    def test_changed_lyrics_use_new_original_hash_and_new_translation(self, mock_get_song, mock_translate):
+        old_lyrics = "Old line"
+        new_lyrics = "New line"
+        SongTranslation.objects.create(
+            source="lrclib",
+            external_id="101",
+            language="ru",
+            original_hash=hash_original_text(old_lyrics),
+            translated_text="Старая строка",
+            aligned_lines=[{"index": 0, "en": "Old line", "ru": "Старая строка"}],
+            provider="mock",
+        )
+        mock_get_song.return_value = _song_payload(plain_lyrics=new_lyrics)
+        mock_translate.return_value = ["Новая строка"]
+
+        response = self.client.get(reverse("song_detail", args=[101]))
+
+        self.assertContains(response, "Новая строка")
+        self.assertEqual(
+            SongTranslation.objects.filter(source="lrclib", external_id="101", language="ru").count(),
+            2,
+        )
+
+    @patch("core.views.translate_lines_to_russian")
+    @patch("core.views.get_song")
+    def test_aligned_lines_contain_index_en_and_ru(self, mock_get_song, mock_translate):
+        mock_get_song.return_value = _song_payload(plain_lyrics="Line one\nLine two")
+        mock_translate.return_value = ["Строка один", "Строка два"]
+
+        self.client.get(reverse("song_detail", args=[101]))
+
+        translation = SongTranslation.objects.get(source="lrclib", external_id="101", language="ru")
+        self.assertEqual(
+            translation.aligned_lines,
+            [
+                {"index": 0, "en": "Line one", "ru": "Строка один"},
+                {"index": 1, "en": "Line two", "ru": "Строка два"},
+            ],
+        )
 
 
 class SearchViewTests(TestCase):
