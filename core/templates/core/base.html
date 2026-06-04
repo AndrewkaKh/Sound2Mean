@@ -12,17 +12,37 @@
     <div class="logo">
         <a href="{% url 'index' %}">Sound2Mean</a>
     </div>
+
     <div class="header-right">
-        {% if request.session.tg_username %}
-            <span class="username">@{{ request.session.tg_username }}</span>
-            <a class="btn" href="{% url 'logout' %}">Выйти</a>
+        {% if tg_user %}
+            <div class="tg-auth tg-auth--logged-in" title="Вы вошли через Telegram">
+                <span class="tg-auth__badge" aria-hidden="true">✓</span>
+                <div class="tg-auth__info">
+                    <span class="tg-auth__status">Вы авторизованы</span>
+                    <span class="tg-auth__name">{{ tg_user.display_name }}</span>
+                </div>
+                <a class="btn btn--ghost" href="{% url 'logout' %}">Выйти</a>
+            </div>
         {% else %}
-            <a class="btn" href="{% url 'login' %}">Войти через Telegram</a>
+            <div class="tg-auth tg-auth--guest">
+                <div class="tg-auth__prompt">
+                    <span class="tg-auth__label">Вход через Telegram</span>
+                    <span class="tg-auth__hint">Код приходит в бота</span>
+                </div>
+                <a class="btn" href="{% url 'login' %}">Войти</a>
+            </div>
         {% endif %}
     </div>
 </header>
 
 <main class="main">
+    {% if messages %}
+        <div class="flash-messages" aria-live="polite">
+            {% for message in messages %}
+                <p class="flash flash-{{ message.tags }}">{{ message }}</p>
+            {% endfor %}
+        </div>
+    {% endif %}
     {% block content %}{% endblock %}
 </main>
 </body>
