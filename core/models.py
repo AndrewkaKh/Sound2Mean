@@ -29,7 +29,14 @@ class VocabularyWord(models.Model):
     )
     word_en = models.CharField(max_length=255)
     word_ru = models.CharField(max_length=255)
+    context = models.TextField(blank=True, default="")
+    song_source = models.CharField(max_length=50, blank=True, default="")
+    song_external_id = models.CharField(max_length=100, blank=True, default="")
+    song_title = models.CharField(max_length=255, blank=True, default="")
+    song_artist = models.CharField(max_length=255, blank=True, default="")
     is_favorite = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = "Vocabulary word"
@@ -43,6 +50,8 @@ class VocabularyWord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.word_en} — {self.word_ru}"
+
+
 class SearchHistory(models.Model):
     user = models.ForeignKey(
         TelegramUser,

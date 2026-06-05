@@ -15,4 +15,5 @@ urlpatterns = [
     path("api/lyrics/search/", api_views.lyrics_search, name="api_lyrics_search"),
     path("api/lyrics/get/", api_views.lyrics_get, name="api_lyrics_get"),
     path("api/lyrics/resolve/", api_views.lyrics_resolve, name="api_lyrics_resolve"),
+    path("api/cards/", api_views.cards_create, name="api_cards_create"),
 ]

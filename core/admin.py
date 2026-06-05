@@ -10,9 +10,11 @@ class TelegramUserAdmin(admin.ModelAdmin):
 
 @admin.register(VocabularyWord)
 class VocabularyWordAdmin(admin.ModelAdmin):
-    list_display = ("word_en", "word_ru", "is_favorite", "user")
+    list_display = ("word_en", "word_ru", "song_title", "is_favorite", "user", "updated_at")
     list_filter = ("user", "is_favorite")
-    search_fields = ("word_en", "word_ru", "user__username")
+    search_fields = ("word_en", "word_ru", "context", "song_title", "song_artist", "user__username")
+
+
 @admin.register(SearchHistory)
 class SearchHistoryAdmin(admin.ModelAdmin):
     list_display = ("user", "query", "normalized_query", "created_at")

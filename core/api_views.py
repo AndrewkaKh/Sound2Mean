@@ -1,13 +1,18 @@
 import logging
+import json
 from functools import wraps
 
 import requests
 from django.conf import settings
+from django.core.cache import cache
+from django.db import DatabaseError, IntegrityError
 from django.http import JsonResponse
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
+from .models import TelegramUser, VocabularyWord
 from .services.lyrics_service import consume_last_provider_error, get_song, resolve_lyrics, search_candidates
 from .services.providers.lrclib import LRCLibError
+from .services.translation_service import TranslationServiceError, translate_lines_to_russian
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +76,111 @@ def _bad_request(message: str, code: str = "bad_request"):
     return JsonResponse({"ok": False, "error": {"code": code, "message": message}}, status=400)
 
 
+def _get_current_telegram_user(request) -> TelegramUser | None:
+    payload = request.session.get("tg_user") or {}
+    telegram_id = payload.get("id")
+    if not telegram_id:
+        return None
+
+    try:
+        return TelegramUser.objects.filter(telegram_id=telegram_id).first()
+    except DatabaseError:
+        return None
+
+
+def _unauthorized(message: str = "Authentication required"):
+    return JsonResponse({"ok": False, "error": {"code": "unauthorized", "message": message}}, status=401)
+
+
+def _parse_json_body(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _suggest_translation(word: str) -> str:
+    if not word:
+        return ""
+    try:
+        translated = translate_lines_to_russian([word])
+    except TranslationServiceError:
+        return ""
+    except Exception:
+        logger.exception("Unexpected translation preview error for word '%s'", word)
+        return ""
+    return translated[0].strip() if translated else ""
+
+
+def _song_metadata(
+    song_id_value: str,
+    *,
+    fallback_title: str = "",
+    fallback_artist: str = "",
+) -> dict:
+    empty = {
+        "song_source": "",
+        "song_external_id": "",
+        "song_title": fallback_title,
+        "song_artist": fallback_artist,
+    }
+    if not song_id_value:
+        return empty
+
+    try:
+        song_id = int(song_id_value)
+    except ValueError:
+        return {
+            "song_source": "lrclib",
+            "song_external_id": song_id_value,
+            "song_title": fallback_title,
+            "song_artist": fallback_artist,
+        }
+
+    cached = cache.get(f"s2m:song:{song_id}")
+    if cached:
+        return {
+            "song_source": cached.get("source") or "lrclib",
+            "song_external_id": str(cached.get("id") or song_id),
+            "song_title": cached.get("title") or fallback_title,
+            "song_artist": cached.get("artist") or fallback_artist,
+        }
+
+    try:
+        song = get_song(song_id) or {}
+    except Exception:
+        logger.exception("Failed to load song metadata for card (song_id=%s)", song_id)
+        song = {}
+
+    if not song:
+        return {
+            "song_source": "lrclib",
+            "song_external_id": str(song_id),
+            "song_title": fallback_title,
+            "song_artist": fallback_artist,
+        }
+
+    return {
+        "song_source": song.get("source") or "lrclib",
+        "song_external_id": str(song.get("id") or song_id),
+        "song_title": song.get("title") or fallback_title,
+        "song_artist": song.get("artist") or fallback_artist,
+    }
+
+
+def _serialize_card(card: VocabularyWord) -> dict:
+    return {
+        "id": card.id,
+        "word": card.word_en,
+        "translation": card.word_ru,
+        "context": card.context,
+        "song": card.song_title,
+        "song_artist": card.song_artist,
+        "is_favorite": card.is_favorite,
+    }
+
+
 @require_GET
 @lrclib_guard
 def lyrics_search(request):
@@ -131,3 +241,68 @@ def lyrics_resolve(request):
 
     data = resolve_lyrics(q=q or None, artist=artist or None, track_name=track_name or None, limit=limit)
     return JsonResponse({"ok": True, "data": data})
+
+
+@require_POST
+def cards_create(request):
+    user = _get_current_telegram_user(request)
+    if not user:
+        return _unauthorized("Войдите через Telegram, чтобы сохранять карточки.")
+
+    payload = _parse_json_body(request)
+    if payload is None:
+        return _bad_request("Invalid JSON body", code="invalid_json")
+
+    word = (payload.get("word") or "").strip()
+    translation = (payload.get("translation") or "").strip()
+    context = (payload.get("context") or "").strip()
+    song_id = str(payload.get("song_id") or "").strip()
+    preview = bool(payload.get("preview"))
+
+    if not word:
+        return _bad_request("Field 'word' is required", code="missing_word")
+
+    suggested_translation = translation or _suggest_translation(word)
+    if preview:
+        return JsonResponse(
+            {
+                "ok": True,
+                "preview": True,
+                "word": word,
+                "translation": suggested_translation,
+                "context": context,
+            }
+        )
+
+    metadata = _song_metadata(
+        song_id,
+        fallback_title=(payload.get("song_title") or "").strip(),
+        fallback_artist=(payload.get("song_artist") or "").strip(),
+    )
+    card = VocabularyWord.objects.filter(user=user, word_en__iexact=word).first()
+    if card is None:
+        card = VocabularyWord(user=user, word_en=word)
+    else:
+        card.word_en = word
+
+    card.word_ru = suggested_translation
+    card.context = context
+    card.song_source = metadata["song_source"]
+    card.song_external_id = metadata["song_external_id"]
+    card.song_title = metadata["song_title"]
+    card.song_artist = metadata["song_artist"]
+    try:
+        card.save()
+    except IntegrityError:
+        card = VocabularyWord.objects.get(user=user, word_en__iexact=word)
+        card.word_ru = suggested_translation
+        card.context = context
+        card.song_source = metadata["song_source"]
+        card.song_external_id = metadata["song_external_id"]
+        card.song_title = metadata["song_title"]
+        card.song_artist = metadata["song_artist"]
+        card.save()
+
+    request.session["flashcard_current_id"] = card.id
+    request.session.modified = True
+    return JsonResponse({"ok": True, "card": _serialize_card(card)})

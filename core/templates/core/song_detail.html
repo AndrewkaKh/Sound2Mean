@@ -1,7 +1,13 @@
 {% extends "core/base.html" %}
 
 {% block content %}
-<div class="song-page">
+<div
+  class="song-page"
+  data-song-id="{{ song.id|default:'' }}"
+  data-song-title="{{ song.title|default:'' }}"
+  data-song-artist="{{ song.artist|default:'' }}"
+  data-cards-enabled="{% if tg_user %}1{% else %}0{% endif %}"
+>
   <a class="btn-secondary" href="{% url 'index' %}">← Назад</a>
 
   <div class="song-header">
@@ -33,7 +39,7 @@
 
           {% for line in lyrics_lines %}
             <div class="lyrics-line-pair" data-line-index="{{ line.index }}">
-              <div class="lyrics-table-cell lyrics-line-en">{{ line.en|default:" " }}</div>
+              <div class="lyrics-table-cell lyrics-line-en" data-line-index="{{ line.index }}">{{ line.en|default:" " }}</div>
               <div class="lyrics-table-cell lyrics-line-ru">{{ line.ru|default:"—" }}</div>
             </div>
           {% endfor %}
@@ -54,5 +60,268 @@
       {% endif %}
     </div>
   </div>
+
+  <button type="button" class="word-card-action is-hidden" id="word-card-action">+ Добавить в карточки</button>
+
+  <div class="word-card-modal is-hidden" id="word-card-modal" role="dialog" aria-modal="true" aria-labelledby="word-card-title">
+    <div class="word-card-modal__backdrop" data-close-card-modal="1"></div>
+    <div class="word-card-modal__panel">
+      <div class="word-card-modal__header">
+        <h2 id="word-card-title">Новая карточка</h2>
+        <button type="button" class="word-card-modal__close" data-close-card-modal="1" aria-label="Закрыть">×</button>
+      </div>
+
+      <form class="word-card-form" id="word-card-form">
+        {% csrf_token %}
+        <label for="word-card-word">Word / Phrase</label>
+        <input id="word-card-word" name="word" type="text" required>
+
+        <label for="word-card-translation">Translation</label>
+        <input id="word-card-translation" name="translation" type="text" placeholder="Будет предложен автоматически">
+
+        <label for="word-card-context">Context</label>
+        <textarea id="word-card-context" name="context" rows="3"></textarea>
+
+        <label for="word-card-song">Song</label>
+        <input id="word-card-song" name="song" type="text" readonly>
+
+        <div class="word-card-form__actions">
+          <button type="button" class="btn-secondary" data-close-card-modal="1">Отмена</button>
+          <button type="submit" class="btn" id="word-card-submit">Сохранить</button>
+        </div>
+
+        <p class="word-card-form__status muted is-hidden" id="word-card-status"></p>
+      </form>
+    </div>
+  </div>
+
+  <div class="word-card-toast is-hidden" id="word-card-toast" aria-live="polite"></div>
 </div>
+
+<script>
+(function () {
+  var page = document.querySelector('.song-page');
+  var actionButton = document.getElementById('word-card-action');
+  var modal = document.getElementById('word-card-modal');
+  var form = document.getElementById('word-card-form');
+  var wordInput = document.getElementById('word-card-word');
+  var translationInput = document.getElementById('word-card-translation');
+  var contextInput = document.getElementById('word-card-context');
+  var songInput = document.getElementById('word-card-song');
+  var statusNode = document.getElementById('word-card-status');
+  var submitButton = document.getElementById('word-card-submit');
+  var toast = document.getElementById('word-card-toast');
+  var cardsEnabled = page && page.dataset.cardsEnabled === '1';
+  var currentSelection = null;
+
+  if (!page || !actionButton || !modal || !form || !wordInput || !translationInput || !contextInput || !songInput) {
+    return;
+  }
+
+  function getCookie(name) {
+    var cookieValue = null;
+    if (!document.cookie) return cookieValue;
+    var cookies = document.cookie.split(';');
+    for (var i = 0; i < cookies.length; i += 1) {
+      var cookie = cookies[i].trim();
+      if (cookie.substring(0, name.length + 1) === (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+        break;
+      }
+    }
+    return cookieValue;
+  }
+
+  function showToast(message, isError) {
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.remove('is-hidden', 'is-error');
+    if (isError) {
+      toast.classList.add('is-error');
+    }
+    window.clearTimeout(showToast._timer);
+    showToast._timer = window.setTimeout(function () {
+      toast.classList.add('is-hidden');
+      toast.classList.remove('is-error');
+    }, 2600);
+  }
+
+  function setStatus(message) {
+    if (!statusNode) return;
+    if (!message) {
+      statusNode.textContent = '';
+      statusNode.classList.add('is-hidden');
+      return;
+    }
+    statusNode.textContent = message;
+    statusNode.classList.remove('is-hidden');
+  }
+
+  function hideActionButton() {
+    actionButton.classList.add('is-hidden');
+  }
+
+  function openModal() {
+    if (!currentSelection) return;
+    wordInput.value = currentSelection.word;
+    translationInput.value = '';
+    contextInput.value = currentSelection.context;
+    songInput.value = currentSelection.song;
+    setStatus('Подбираем перевод...');
+    modal.classList.remove('is-hidden');
+    translationInput.focus();
+    requestPreview();
+  }
+
+  function closeModal() {
+    modal.classList.add('is-hidden');
+    setStatus('');
+  }
+
+  function positionActionButton(rect) {
+    var top = rect.bottom + 8;
+    var left = rect.left;
+    actionButton.style.top = top + 'px';
+    actionButton.style.left = left + 'px';
+    actionButton.classList.remove('is-hidden');
+  }
+
+  function extractSelection() {
+    var selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return null;
+    }
+
+    var text = selection.toString().replace(/\s+/g, ' ').trim();
+    if (!text) {
+      return null;
+    }
+
+    var anchorNode = selection.anchorNode;
+    var container = anchorNode && anchorNode.nodeType === Node.TEXT_NODE ? anchorNode.parentElement : anchorNode;
+    if (!container) {
+      return null;
+    }
+
+    var lineNode = container.closest('.lyrics-line-en');
+    if (!lineNode) {
+      return null;
+    }
+
+    var pairNode = lineNode.closest('.lyrics-line-pair');
+    var context = lineNode.textContent.replace(/\s+/g, ' ').trim();
+    var rect = selection.getRangeAt(0).getBoundingClientRect();
+    return {
+      word: text,
+      context: context,
+      lineIndex: pairNode ? pairNode.dataset.lineIndex : '',
+      songId: page.dataset.songId || '',
+      song: [page.dataset.songTitle || '', page.dataset.songArtist || ''].filter(Boolean).join(' · '),
+      rect: rect
+    };
+  }
+
+  function requestPreview() {
+    if (!currentSelection) return;
+    fetch('{% url "api_cards_create" %}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify({
+        preview: true,
+        word: currentSelection.word,
+        context: currentSelection.context,
+        song_id: currentSelection.songId,
+        song_title: page.dataset.songTitle || '',
+        song_artist: page.dataset.songArtist || ''
+      })
+    })
+      .then(function (response) { return response.json(); })
+      .then(function (payload) {
+        if (payload && payload.ok) {
+          translationInput.value = payload.translation || '';
+          setStatus('');
+          return;
+        }
+        setStatus('Не удалось подобрать перевод автоматически.');
+      })
+      .catch(function () {
+        setStatus('Не удалось подобрать перевод автоматически.');
+      });
+  }
+
+  document.addEventListener('mouseup', function () {
+    var selectionData = extractSelection();
+    if (!selectionData) {
+      hideActionButton();
+      return;
+    }
+    currentSelection = selectionData;
+    if (!cardsEnabled) {
+      hideActionButton();
+      showToast('Войдите через Telegram, чтобы сохранять карточки.', true);
+      return;
+    }
+    positionActionButton(selectionData.rect);
+  });
+
+  actionButton.addEventListener('click', function () {
+    openModal();
+    hideActionButton();
+  });
+
+  document.addEventListener('mousedown', function (event) {
+    if (modal.classList.contains('is-hidden') && !actionButton.contains(event.target)) {
+      hideActionButton();
+    }
+    if (event.target.matches('[data-close-card-modal="1"]')) {
+      closeModal();
+    }
+  });
+
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    if (!currentSelection) {
+      showToast('Сначала выделите слово или фразу.', true);
+      return;
+    }
+
+    submitButton.disabled = true;
+    setStatus('Сохраняем карточку...');
+    fetch('{% url "api_cards_create" %}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify({
+        word: wordInput.value.trim(),
+        translation: translationInput.value.trim(),
+        context: contextInput.value.trim(),
+        song_id: currentSelection.songId,
+        song_title: page.dataset.songTitle || '',
+        song_artist: page.dataset.songArtist || ''
+      })
+    })
+      .then(function (response) { return response.json(); })
+      .then(function (payload) {
+        if (!payload || !payload.ok) {
+          var message = payload && payload.error && payload.error.message ? payload.error.message : 'Не удалось сохранить карточку.';
+          throw new Error(message);
+        }
+        closeModal();
+        showToast('Карточка добавлена', false);
+        window.getSelection().removeAllRanges();
+      })
+      .catch(function (error) {
+        setStatus(error.message || 'Не удалось сохранить карточку.');
+      })
+      .finally(function () {
+        submitButton.disabled = false;
+      });
+  });
+})();
+</script>
 {% endblock %}

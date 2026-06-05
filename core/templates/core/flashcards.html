@@ -41,6 +41,14 @@
                     <div class="flashcard__body">
                         <div class="flashcard__en">{{ card.word_en }}</div>
                         <div class="flashcard__ru is-hidden" id="flashcard-ru">{{ card.word_ru }}</div>
+                        {% if card.context %}
+                            <div class="flashcard__context">“{{ card.context }}”</div>
+                        {% endif %}
+                        {% if card.song_title or card.song_artist %}
+                            <div class="flashcard__song">
+                                {{ card.song_title }}{% if card.song_artist %} · {{ card.song_artist }}{% endif %}
+                            </div>
+                        {% endif %}
                     </div>
 
                     <div class="flashcard__corners">
