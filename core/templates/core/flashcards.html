@@ -1,0 +1,149 @@
+{% extends 'core/base.html' %}
+
+{% block title %}Карточки — Sound2Mean{% endblock %}
+
+{% block content %}
+<section class="flashcards-page">
+    <a class="btn-secondary" href="{% url 'index' %}">← На главную</a>
+
+    {% if not authorized %}
+        <div class="flashcards-gate">
+            <h1>Карточки слов</h1>
+            <p>Вы не можете пользоваться этой страницей, пока не зарегистрируетесь.</p>
+            <p class="flashcards-gate__hint">Войдите через Telegram — после регистрации откроются ваши слова и карточки для повторения.</p>
+            <a class="btn" href="{% url 'login' %}">Зарегистрироваться</a>
+        </div>
+    {% else %}
+        <h1>Карточки слов</h1>
+        <p class="flashcards-meta">
+            В словаре: {{ words_count }}
+            · Избранное: {{ favorites_count }}
+        </p>
+
+        <div class="flashcards-deck-switch">
+            <form method="post" class="flashcards-deck-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="set_deck">
+                <button type="submit" name="deck" value="{{ deck_all }}"
+                        class="flashcards-deck-btn {% if deck_mode == deck_all %}is-active{% endif %}">
+                    Все слова
+                </button>
+                <button type="submit" name="deck" value="{{ deck_favorites }}"
+                        class="flashcards-deck-btn {% if deck_mode == deck_favorites %}is-active{% endif %}">
+                    Избранное
+                </button>
+            </form>
+        </div>
+
+        {% if card %}
+            <div class="flashcard-stack">
+                <div class="flashcard" id="flashcard">
+                    <div class="flashcard__body">
+                        <div class="flashcard__en">{{ card.word_en }}</div>
+                        <div class="flashcard__ru is-hidden" id="flashcard-ru">{{ card.word_ru }}</div>
+                    </div>
+
+                    <div class="flashcard__corners">
+                        <form method="post" class="flashcard-corner-form"
+                              onsubmit="return confirm('Удалить слово «{{ card.word_en }}»?');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="card_id" value="{{ card.id }}">
+                            <button type="submit" class="flashcard-icon-btn flashcard-icon-btn--delete" aria-label="Удалить слово">
+                                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+                                    <path d="M4 4L14 14M14 4L4 14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                                </svg>
+                            </button>
+                        </form>
+
+                        <form method="post" class="flashcard-corner-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="toggle_favorite">
+                            <input type="hidden" name="card_id" value="{{ card.id }}">
+                            <button type="submit"
+                                    class="flashcard-icon-btn flashcard-icon-btn--favorite {% if card.is_favorite %}is-active{% endif %}"
+                                    aria-label="{% if card.is_favorite %}Убрать из избранного{% else %}Добавить в избранное{% endif %}">
+                                {% if card.is_favorite %}
+                                    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path fill="#FFC107" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                                    </svg>
+                                {% else %}
+                                    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path fill="none" stroke="#FFC107" stroke-width="1.8" stroke-linejoin="round"
+                                              d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                                    </svg>
+                                {% endif %}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="flashcard-toolbar">
+                    <button type="button" class="btn btn--reveal" id="show-translation">
+                        Показать перевод
+                    </button>
+                    <form method="post" class="flashcard-next-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="next">
+                        <button type="submit" class="btn btn--next"{% if not can_next %} disabled{% endif %}>Следующая карточка</button>
+                    </form>
+                    <form method="post" class="flashcard-shuffle-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="toggle_shuffle">
+                        <button type="submit"
+                                class="flashcard-shuffle-btn {% if shuffle_enabled %}is-active{% endif %}"
+                                aria-label="{% if shuffle_enabled %}Перемешивание включено{% else %}Перемешивание выключено{% endif %}"
+                                aria-pressed="{% if shuffle_enabled %}true{% else %}false{% endif %}">
+                            {% if shuffle_enabled %}
+                                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path fill="currentColor" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
+                                </svg>
+                            {% else %}
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>
+                                </svg>
+                            {% endif %}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        {% else %}
+            <div class="flashcards-empty">
+                {% if deck_mode == deck_favorites %}
+                    <p>В избранном пока нет слов.</p>
+                {% else %}
+                    <p>Слов пока нет. Добавьте первое слово ниже.</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <details class="flashcards-add">
+            <summary>Добавить слово</summary>
+            <form method="post" class="flashcards-add-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="add_word">
+                <label for="id_word_en">English</label>
+                <input id="id_word_en" type="text" name="word_en" placeholder="hello" required>
+                <label for="id_word_ru">Перевод</label>
+                <input id="id_word_ru" type="text" name="word_ru" placeholder="привет" required>
+                <button type="submit" class="btn flashcards-add-submit">Добавить</button>
+            </form>
+        </details>
+    {% endif %}
+</section>
+
+{% if authorized and card %}
+<script>
+(function () {
+    var btn = document.getElementById('show-translation');
+    var ru = document.getElementById('flashcard-ru');
+    if (!btn || !ru) return;
+    btn.addEventListener('click', function () {
+        ru.classList.remove('is-hidden');
+        btn.classList.add('is-used');
+        btn.textContent = 'Перевод';
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

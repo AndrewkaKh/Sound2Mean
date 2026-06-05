@@ -7,6 +7,7 @@ urlpatterns = [
     path("", views.index, name="index"),
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
+    path("flashcards/", views.flashcards, name="flashcards"),
     path("search/", views.search, name="search"),
     path("song/<int:song_id>/", views.song_detail, name="song_detail"),
 

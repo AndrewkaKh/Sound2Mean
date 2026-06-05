@@ -5,6 +5,21 @@ from django.http import Http404
 from django.shortcuts import redirect, render
 import requests
 
+from .models import TelegramUser, VocabularyWord
+from .services.flashcards import (
+    DECK_ALL,
+    DECK_FAVORITES,
+    advance_to_next,
+    can_advance,
+    get_current_word_id,
+    get_deck_mode,
+    get_deck_word_ids,
+    get_user_word_ids,
+    is_shuffle_enabled,
+    reset_queue,
+    set_deck_mode,
+    toggle_shuffle,
+)
 from .services.lyrics_service import get_song, search_candidates
 from .services.login_code import verify_code
 from .services.telegram_bot import TelegramBotError
@@ -141,9 +156,110 @@ def logout_view(request):
     request.session.pop("tg_user", None)
     request.session.pop("tg_username", None)
     request.session.pop("login_code_pending", None)
+    request.session.pop("flashcard_queue", None)
+    request.session.pop("flashcard_current_id", None)
     request.session.modified = True
     messages.info(request, "Вы вышли из аккаунта.")
     return redirect("index")
+
+
+def _get_telegram_user(request) -> TelegramUser | None:
+    tg = request.session.get("tg_user")
+    if not tg:
+        return None
+    return TelegramUser.objects.filter(telegram_id=tg.get("id")).first()
+
+
+def flashcards(request):
+    if not request.session.get("tg_user"):
+        if request.method == "POST":
+            return redirect("login")
+        return render(request, "core/flashcards.html", {"authorized": False})
+
+    user = _get_telegram_user(request)
+    if not user:
+        if request.method == "POST":
+            return redirect("login")
+        return render(request, "core/flashcards.html", {"authorized": False})
+
+    deck_mode = get_deck_mode(request)
+
+    if request.method == "GET" and request.GET.get("deck") in (DECK_ALL, DECK_FAVORITES):
+        set_deck_mode(request, request.GET["deck"])
+        deck_mode = get_deck_mode(request)
+
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+        card_id = request.POST.get("card_id", "").strip()
+
+        if action == "set_deck":
+            mode = request.POST.get("deck", DECK_ALL)
+            set_deck_mode(request, mode)
+            deck_mode = get_deck_mode(request)
+        elif action == "toggle_shuffle":
+            toggle_shuffle(request)
+        elif action == "add_word":
+            word_en = (request.POST.get("word_en") or "").strip()
+            word_ru = (request.POST.get("word_ru") or "").strip()
+            if not word_en or not word_ru:
+                messages.error(request, "Заполните слово и перевод.")
+            else:
+                _, created = VocabularyWord.objects.get_or_create(
+                    user=user,
+                    word_en=word_en,
+                    defaults={"word_ru": word_ru},
+                )
+                if created:
+                    reset_queue(request)
+        elif action == "next":
+            word_ids = get_deck_word_ids(user, deck_mode)
+            if can_advance(word_ids):
+                advance_to_next(request, word_ids)
+        elif action == "delete" and card_id.isdigit():
+            deleted, _ = VocabularyWord.objects.filter(
+                pk=int(card_id),
+                user=user,
+            ).delete()
+            if deleted:
+                reset_queue(request)
+                word_ids = get_deck_word_ids(user, deck_mode)
+                if word_ids:
+                    advance_to_next(request, word_ids)
+        elif action == "toggle_favorite" and card_id.isdigit():
+            word = VocabularyWord.objects.filter(pk=int(card_id), user=user).first()
+            if word:
+                word.is_favorite = not word.is_favorite
+                word.save(update_fields=["is_favorite"])
+                if not word.is_favorite and deck_mode == DECK_FAVORITES:
+                    reset_queue(request)
+                    word_ids = get_deck_word_ids(user, deck_mode)
+                    if word_ids:
+                        advance_to_next(request, word_ids)
+
+        deck_mode = get_deck_mode(request)
+
+    word_ids = get_deck_word_ids(user, deck_mode)
+    current_id = get_current_word_id(request, word_ids)
+    card = VocabularyWord.objects.filter(pk=current_id, user=user).first() if current_id else None
+    total_count = len(get_user_word_ids(user))
+    favorites_count = len(get_user_word_ids(user, favorites_only=True))
+    shuffle_enabled = is_shuffle_enabled(request)
+
+    return render(
+        request,
+        "core/flashcards.html",
+        {
+            "authorized": True,
+            "card": card,
+            "deck_mode": deck_mode,
+            "deck_all": DECK_ALL,
+            "deck_favorites": DECK_FAVORITES,
+            "words_count": total_count,
+            "favorites_count": favorites_count,
+            "shuffle_enabled": shuffle_enabled,
+            "can_next": can_advance(word_ids),
+        },
+    )
 
 
 def search(request):

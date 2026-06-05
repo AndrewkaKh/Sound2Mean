@@ -19,3 +19,27 @@ class TelegramUser(models.Model):
         if self.username:
             return f"@{self.username}"
         return f"ID {self.telegram_id}"
+
+
+class VocabularyWord(models.Model):
+    user = models.ForeignKey(
+        TelegramUser,
+        on_delete=models.CASCADE,
+        related_name="vocabulary_words",
+    )
+    word_en = models.CharField(max_length=255)
+    word_ru = models.CharField(max_length=255)
+    is_favorite = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = "Vocabulary word"
+        verbose_name_plural = "Vocabulary words"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "word_en"],
+                name="unique_word_en_per_user",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.word_en} — {self.word_ru}"
