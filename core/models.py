@@ -64,3 +64,26 @@ class SearchHistory(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user}: {self.query}"
+
+
+class SongTranslation(models.Model):
+    source = models.CharField(max_length=50, default="lrclib")
+    external_id = models.CharField(max_length=100)
+    language = models.CharField(max_length=10, default="ru")
+    original_hash = models.CharField(max_length=64)
+    translated_text = models.TextField(blank=True)
+    aligned_lines = models.JSONField(default=list, blank=True)
+    provider = models.CharField(max_length=50, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "external_id", "language", "original_hash"],
+                name="unique_song_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.source}:{self.external_id}:{self.language}"

@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.contrib import messages
 from django.core.cache import cache
@@ -6,7 +8,7 @@ from django.http import Http404
 from django.shortcuts import redirect, render
 import requests
 
-from .models import TelegramUser, VocabularyWord
+from .models import TelegramUser, VocabularyWord, SongTranslation
 from .services.flashcards import (
     DECK_ALL,
     DECK_FAVORITES,
@@ -26,6 +28,15 @@ from .services.search_history import get_recent_queries_for_user, save_user_quer
 from .services.login_code import verify_code
 from .services.telegram_bot import TelegramBotError
 from .services.telegram_users import find_by_username, send_login_code
+from .services.translation_service import (
+    TranslationServiceError,
+    build_aligned_lines,
+    hash_original_text,
+    split_lyrics_lines,
+    translate_lines_to_russian,
+)
+
+logger = logging.getLogger(__name__)
 
 SONGS = [
     {
@@ -110,6 +121,70 @@ def _get_current_telegram_user(request) -> TelegramUser | None:
         return TelegramUser.objects.filter(telegram_id=telegram_id).first()
     except DatabaseError:
         return None
+
+
+def _build_song_lines(song: dict, translation_error: str | None = None) -> tuple[list[dict], str | None]:
+    plain_lyrics = song.get("plainLyrics") or ""
+    english_text = plain_lyrics or (song.get("syncedLyrics") or "")
+    english_lines = split_lyrics_lines(english_text)
+    if not english_lines:
+        return [], translation_error
+
+    if not plain_lyrics:
+        return build_aligned_lines(english_lines, [""] * len(english_lines)), (
+            translation_error or "Перевод временно недоступен. Английский текст всё равно доступен."
+        )
+
+    source = song.get("source") or "lrclib"
+    external_id = str(song.get("id") or "")
+    original_hash = hash_original_text(plain_lyrics)
+    cached_translation = SongTranslation.objects.filter(
+        source=source,
+        external_id=external_id,
+        language=settings.TRANSLATION_TARGET_LANGUAGE,
+        original_hash=original_hash,
+    ).first()
+
+    if cached_translation:
+        aligned_lines = cached_translation.aligned_lines or build_aligned_lines(
+            english_lines,
+            split_lyrics_lines(cached_translation.translated_text),
+        )
+        if len(aligned_lines) != len(english_lines):
+            return build_aligned_lines(
+                english_lines,
+                [line.get("ru", "") for line in aligned_lines if isinstance(line, dict)],
+            ), translation_error
+        return aligned_lines, translation_error
+
+    try:
+        russian_lines = translate_lines_to_russian(english_lines)
+    except TranslationServiceError as exc:
+        logger.warning("Translation unavailable for song %s: %s", external_id or "unknown", exc)
+        return build_aligned_lines(english_lines, [""] * len(english_lines)), str(exc)
+    except Exception:
+        logger.exception("Unexpected translation error for song %s", external_id or "unknown")
+        return (
+            build_aligned_lines(english_lines, [""] * len(english_lines)),
+            "Перевод временно недоступен. Английский текст всё равно доступен.",
+        )
+
+    aligned_lines = build_aligned_lines(english_lines, russian_lines)
+    translated_text = "\n".join(line["ru"] for line in aligned_lines)
+    try:
+        SongTranslation.objects.create(
+            source=source,
+            external_id=external_id,
+            language=settings.TRANSLATION_TARGET_LANGUAGE,
+            original_hash=original_hash,
+            translated_text=translated_text,
+            aligned_lines=aligned_lines,
+            provider=(settings.TRANSLATION_PROVIDER or "").strip().lower(),
+        )
+    except DatabaseError:
+        logger.exception("Failed to save translation cache for song %s", external_id or "unknown")
+
+    return aligned_lines, translation_error
 
 
 def login_view(request):
@@ -291,6 +366,7 @@ def search(request):
         artist=artist or None,
         track_name=track_name or None,
         limit=5,
+        allow_ai=True,
     )
     provider_error = consume_last_provider_error()
     if provider_error is not None:
@@ -342,16 +418,15 @@ def search(request):
 def song_detail(request, song_id: int):
     cached = cache.get(f"s2m:song:{song_id}")
     if cached and (cached.get("plainLyrics") or cached.get("syncedLyrics")):
-        lyrics_en = (cached.get("plainLyrics") or cached.get("syncedLyrics") or "").splitlines()
-        lyrics_ru = [""] * len(lyrics_en)
-        lines = list(zip(lyrics_en, lyrics_ru))
+        lyrics_lines, translation_error = _build_song_lines(cached)
         return render(
             request,
             "core/song_detail.html",
             {
                 "song": cached,
-                "lines": lines,
+                "lyrics_lines": lyrics_lines,
                 "provider_error": None,
+                "translation_error": translation_error,
             },
         )
 
@@ -371,15 +446,14 @@ def song_detail(request, song_id: int):
     if not song:
         raise Http404("Song not found")
 
-    lyrics_en = (song.get("plainLyrics") or song.get("syncedLyrics") or "").splitlines()
-    lyrics_ru = [""] * len(lyrics_en)
-    lines = list(zip(lyrics_en, lyrics_ru))
+    lyrics_lines, translation_error = _build_song_lines(song)
     return render(
         request,
         "core/song_detail.html",
         {
             "song": song,
-            "lines": lines,
+            "lyrics_lines": lyrics_lines,
             "provider_error": None,
+            "translation_error": translation_error,
         },
     )

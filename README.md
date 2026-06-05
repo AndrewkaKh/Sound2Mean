@@ -42,6 +42,19 @@
 **Mobile:** Telegram Bot API  
 **Infrastructure:** Docker, Nginx
 
+## AI Search Planning
+
+The main song source remains LRCLIB.
+
+If `AI_SEARCH_ENABLED=1`, the regular HTML search can use OpenAI only as a query planner for weak or natural-language queries. OpenAI does not replace LRCLIB and does not return songs directly. It only builds several improved search queries, and those queries are then sent to LRCLIB.
+
+Environment variables:
+
+- `AI_SEARCH_ENABLED=0`
+- `OPENAI_API_KEY=`
+- `OPENAI_SEARCH_MODEL=gpt-4o-mini`
+- `AI_SEARCH_TIMEOUT=10`
+
 ## 📅 Ближайшие планы
 
 **Октябрь 2025 - Январь 2026:** Базовый функционал  

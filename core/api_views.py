@@ -78,11 +78,18 @@ def lyrics_search(request):
     track_name = (request.GET.get("track_name") or "").strip()
     artist = (request.GET.get("artist") or request.GET.get("artist_name") or "").strip()
     limit = int(request.GET.get("limit") or 10)
+    use_ai = (request.GET.get("ai") or "").strip() == "1"
 
     if not q and not track_name:
         return _bad_request("Need 'q' or 'track_name'")
 
-    data = search_candidates(q=q or None, artist=artist or None, track_name=track_name or None, limit=limit)
+    data = search_candidates(
+        q=q or None,
+        artist=artist or None,
+        track_name=track_name or None,
+        limit=limit,
+        allow_ai=use_ai,
+    )
     provider_error = consume_last_provider_error()
     if provider_error is not None:
         return _provider_error(

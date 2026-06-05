@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from contextvars import ContextVar
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
+from django.conf import settings
 from django.core.cache import cache
 
+from .ai_search_service import build_ai_search_queries
 from .providers.lrclib import LRCLibError, LrcLibClient
 
 _lrclib = LrcLibClient(timeout=(3.0, 15.0), user_agent="Sound2Mean/0.1")
 _last_provider_error: ContextVar[Optional[LRCLibError]] = ContextVar("last_lyrics_provider_error", default=None)
+logger = logging.getLogger(__name__)
 
 SEARCH_TTL_SECONDS = 60 * 30
 SEARCH_LYRICS_TTL_SECONDS = 60 * 30
@@ -22,6 +26,7 @@ _DASH_RE = re.compile(r"[\u2010\u2011\u2012\u2013\u2014\u2212]+")
 _BRACKET_RE = re.compile(r"\s*[\(\[\{][^()\[\]{}]*[\)\]\}]\s*")
 _SPACE_DASH_SPLIT_RE = re.compile(r"^(?P<artist>.+?)(?:\s+-\s*|\s*-\s+)(?P<title>.+)$")
 _PUNCT_RE = re.compile(r"[^0-9a-z\s-]+")
+_CYRILLIC_RE = re.compile(r"[а-яё]", re.IGNORECASE)
 _STOPWORDS = {
     "a",
     "an",
@@ -37,6 +42,17 @@ _STOPWORDS = {
     "the",
     "to",
     "with",
+}
+_AI_SEARCH_HINT_WORDS = {
+    "lyrics",
+    "song",
+    "песня",
+    "поется",
+    "поётся",
+    "там",
+    "что-то",
+    "что",
+    "где",
 }
 
 
@@ -193,11 +209,12 @@ def _search_cache_keys(
     artist: Optional[str],
     track_name: Optional[str],
     limit: int,
+    ai_mode: str,
 ) -> Tuple[str, str]:
     query_norm = _norm(q or "").lower()
     artist_norm = _norm(artist or "").lower()
     track_norm = _norm(track_name or "").lower()
-    base = _cache_key("lrclib_search", query_norm, artist_norm, track_norm, str(limit))
+    base = _cache_key("lrclib_search", query_norm, artist_norm, track_norm, str(limit), ai_mode)
     return base + ":cands", base + ":lyrics"
 
 
@@ -238,6 +255,59 @@ def _lyrics_similarity(fragment: str, lyrics: str) -> float:
     return min(1.0, (phrase * 0.65) + (token * 0.35))
 
 
+def _looks_like_natural_language(query: str) -> bool:
+    normalized = _norm(query or "").lower()
+    if not normalized:
+        return False
+
+    tokens = normalized.split()
+    if len(tokens) >= 5:
+        return True
+
+    if _CYRILLIC_RE.search(normalized):
+        return True
+
+    return any(word in normalized for word in _AI_SEARCH_HINT_WORDS)
+
+
+def should_use_ai_search(query: str, results: list[dict], *, allow_ai: bool = False) -> bool:
+    normalized = _norm(query or "")
+    if not allow_ai:
+        logger.info("AI search skipped for '%s': allow_ai flag is false", normalized)
+        return False
+    if not getattr(settings, "AI_SEARCH_ENABLED", False):
+        logger.info("AI search skipped for '%s': AI_SEARCH_ENABLED is off", normalized)
+        return False
+    if len(normalized) < 4:
+        logger.info("AI search skipped for '%s': query too short", normalized)
+        return False
+
+    best_score = 0.0
+    if results:
+        try:
+            best_score = float(results[0].get("score") or 0.0)
+        except (TypeError, ValueError):
+            best_score = 0.0
+
+    has_hint = _looks_like_natural_language(normalized)
+    should_use = (not results) or best_score < 0.45 or (has_hint and best_score < 0.72)
+    if should_use:
+        logger.info(
+            "AI search enabled for '%s': results=%s best_score=%.3f natural=%s",
+            normalized,
+            len(results),
+            best_score,
+            has_hint,
+        )
+    else:
+        logger.info(
+            "AI search skipped for '%s': strong results best_score=%.3f",
+            normalized,
+            best_score,
+        )
+    return should_use
+
+
 def _candidate_score(
     item: Dict[str, Any],
     *,
@@ -246,6 +316,8 @@ def _candidate_score(
     artist_query: str,
     track_query: str,
     strict_artist_title: bool,
+    ai_artist_query: str = "",
+    ai_track_query: str = "",
 ) -> Optional[float]:
     title = item.get("trackName") or item.get("name") or ""
     artist = item.get("artistName") or ""
@@ -302,6 +374,11 @@ def _candidate_score(
 
     if artist_query and artist_query == _candidate_norm(artist):
         score += 0.05
+
+    if ai_artist_query:
+        score += _phrase_similarity(ai_artist_query, artist) * 0.06
+    if ai_track_query:
+        score += _phrase_similarity(ai_track_query, title) * 0.08
 
     return round(min(1.0, score), 3)
 
@@ -504,6 +581,8 @@ def _rank_raw_results(
     artist_query: str,
     track_query: str,
     strict_artist_title: bool,
+    ai_artist_query: str = "",
+    ai_track_query: str = "",
 ) -> List[Tuple[float, Dict[str, Any]]]:
     ranked: List[Tuple[float, Dict[str, Any]]] = []
 
@@ -521,6 +600,8 @@ def _rank_raw_results(
             artist_query=artist_query,
             track_query=track_query,
             strict_artist_title=strict_artist_title,
+            ai_artist_query=ai_artist_query,
+            ai_track_query=ai_track_query,
         )
         if score is None:
             continue
@@ -551,10 +632,23 @@ def _rank_raw_results(
 def _collect_search_results(
     attempts: List[Dict[str, Optional[str]]],
     pool: Dict[Tuple[str, str], Dict[str, Any]],
-) -> None:
+) -> int:
+    before = len(pool)
     for attempt in attempts:
         results = _lrclib.search(**attempt)
         _merge_raw_results(pool, results)
+    return max(0, len(pool) - before)
+
+
+def _collect_ai_search_results(
+    ai_queries: List[str],
+    pool: Dict[Tuple[str, str], Dict[str, Any]],
+) -> int:
+    before = len(pool)
+    for ai_query in ai_queries:
+        results = _lrclib.search(query=ai_query)
+        _merge_raw_results(pool, results)
+    return max(0, len(pool) - before)
 
 
 def search_candidates(
@@ -564,10 +658,12 @@ def search_candidates(
     track_name: Optional[str] = None,
     limit: int = 10,
     cache_lyrics_top: int = 5,
+    allow_ai: bool = False,
 ) -> List[Dict[str, Any]]:
     _set_last_provider_error(None)
     limit = max(1, min(int(limit), 25))
-    candidates_key, lyrics_map_key = _search_cache_keys(q, artist, track_name, limit)
+    ai_mode = "ai" if allow_ai and getattr(settings, "AI_SEARCH_ENABLED", False) else "fast"
+    candidates_key, lyrics_map_key = _search_cache_keys(q, artist, track_name, limit, ai_mode)
 
     cached = cache.get(candidates_key)
     if cached is not None:
@@ -592,7 +688,7 @@ def search_candidates(
             track_query=context["track_query"],
             strict_artist_title=bool(context["strict_artist_title"]),
         )
- 
+
         best_score = top[0][0] if top else 0.0
         needs_fallback = not top or len(top) < limit or best_score < 0.72
         if needs_fallback and fallback_attempts:
@@ -606,6 +702,34 @@ def search_candidates(
                 track_query=context["track_query"],
                 strict_artist_title=bool(context["strict_artist_title"]),
             )
+
+        candidates_before_ai = [_simplify_candidate(item, score) for score, item in top]
+        user_query = q or track_name or " ".join(part for part in [artist or "", track_name or ""] if part)
+        if should_use_ai_search(user_query, candidates_before_ai, allow_ai=allow_ai):
+            logger.info("AI search called for '%s'", _norm(user_query))
+            try:
+                ai_plan = build_ai_search_queries(user_query, limit=5)
+            except Exception:
+                logger.exception("AI search planner crashed for '%s'", _norm(user_query))
+                ai_plan = {"queries": [], "detected_artist": "", "detected_title": "", "confidence": 0.0}
+            ai_queries = ai_plan.get("queries") or []
+            if ai_queries:
+                logger.info("AI planner queries for '%s': %s", _norm(user_query), ai_queries)
+                added_count = _collect_ai_search_results(ai_queries, pool)
+                logger.info("AI search added %s merged LRCLIB candidates for '%s'", added_count, _norm(user_query))
+                top = _rank_raw_results(
+                    pool,
+                    limit=limit,
+                    query=context["query"],
+                    query_search=context["query_search"],
+                    artist_query=context["artist_query"],
+                    track_query=context["track_query"],
+                    strict_artist_title=bool(context["strict_artist_title"]),
+                    ai_artist_query=normalize_search_text(ai_plan.get("detected_artist", ""), strip_parenthetical=True),
+                    ai_track_query=normalize_search_text(ai_plan.get("detected_title", ""), strip_parenthetical=True),
+                )
+            else:
+                logger.info("AI search returned no extra queries for '%s'", _norm(user_query))
     except LRCLibError as exc:
         _set_last_provider_error(exc)
         return []
@@ -661,9 +785,10 @@ def resolve_lyrics(
     artist: Optional[str],
     track_name: Optional[str] = None,
     limit: int = 10,
+    allow_ai: bool = False,
 ) -> Optional[Dict[str, Any]]:
     limit = max(1, min(int(limit), 25))
-    candidates = search_candidates(q=q, artist=artist, track_name=track_name, limit=limit)
+    candidates = search_candidates(q=q, artist=artist, track_name=track_name, limit=limit, allow_ai=allow_ai)
     if not candidates:
         return None
 
@@ -672,7 +797,8 @@ def resolve_lyrics(
     if not track_id:
         return {"candidate": best, "lyrics": {"plainLyrics": "", "syncedLyrics": ""}}
 
-    _, lyrics_map_key = _search_cache_keys(q, artist, track_name, limit)
+    ai_mode = "ai" if allow_ai and getattr(settings, "AI_SEARCH_ENABLED", False) else "fast"
+    _, lyrics_map_key = _search_cache_keys(q, artist, track_name, limit, ai_mode)
     lyrics_map = cache.get(lyrics_map_key) or {}
     cached_lyrics = lyrics_map.get(int(track_id))
 

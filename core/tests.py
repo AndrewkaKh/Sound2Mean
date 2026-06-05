@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock, patch
 
 import requests
@@ -6,6 +7,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from .models import SearchHistory, SongTranslation, TelegramUser
+from .services.ai_search_service import build_ai_search_queries
 from .services.lyrics_service import normalize_search_text, parse_artist_title_query, search_candidates
 from .services.search_history import normalize_history_query
 from .services.translation_service import (
@@ -136,6 +138,54 @@ class TranslationServiceTests(TestCase):
             "OpenAI API key отклонён. Проверьте TRANSLATION_API_KEY",
         ):
             translate_lines_to_russian(["Line one"])
+
+
+class AISearchServiceTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    @override_settings(AI_SEARCH_ENABLED=False, OPENAI_API_KEY="test-key")
+    @patch("core.services.ai_search_service.requests.post")
+    def test_ai_search_service_skips_openai_when_disabled(self, mock_post):
+        plan = build_ai_search_queries("queen богемская рапсодия")
+
+        self.assertEqual(plan["queries"], [])
+        mock_post.assert_not_called()
+
+    @override_settings(AI_SEARCH_ENABLED=True, OPENAI_API_KEY="test-key", OPENAI_SEARCH_MODEL="gpt-4o-mini")
+    @patch("core.services.ai_search_service.requests.post")
+    def test_ai_search_service_uses_cache(self, mock_post):
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": json.dumps(
+                                {
+                                    "queries": ["Queen Bohemian Rhapsody", "Mama just killed a man"],
+                                    "detected_artist": "Queen",
+                                    "detected_title": "Bohemian Rhapsody",
+                                    "confidence": 0.86,
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                }
+            ]
+        }
+        mock_post.return_value = mock_response
+
+        first = build_ai_search_queries("мама just killed a man queen")
+        second = build_ai_search_queries("мама just killed a man queen")
+
+        self.assertEqual(first["detected_artist"], "Queen")
+        self.assertEqual(second["detected_title"], "Bohemian Rhapsody")
+        self.assertEqual(mock_post.call_count, 1)
 
 
 class LyricsSearchServiceTests(TestCase):
@@ -303,6 +353,132 @@ class LyricsSearchServiceTests(TestCase):
         results = search_candidates(q="beatles help", artist=None, limit=5)
 
         self.assertEqual(results, [])
+
+    @override_settings(AI_SEARCH_ENABLED=False, OPENAI_API_KEY="test-key")
+    @patch("core.services.lyrics_service.build_ai_search_queries")
+    @patch("core.services.lyrics_service._lrclib.search")
+    def test_ai_disabled_openai_not_called(self, mock_search, mock_ai_plan):
+        mock_search.return_value = []
+
+        search_candidates(q="песня где поется i walk a lonely road", artist=None, limit=5, allow_ai=True)
+
+        mock_ai_plan.assert_not_called()
+
+    @override_settings(AI_SEARCH_ENABLED=True, OPENAI_API_KEY="test-key")
+    @patch("core.services.lyrics_service.build_ai_search_queries")
+    @patch("core.services.lyrics_service._lrclib.search")
+    def test_ai_enabled_good_result_skips_openai(self, mock_search, mock_ai_plan):
+        mock_search.return_value = [
+            _lrclib_item(
+                track_id=91,
+                title="Help!",
+                artist="The Beatles",
+                plain_lyrics="Help, I need somebody",
+            )
+        ]
+
+        results = search_candidates(q="beatles help", artist=None, limit=5, allow_ai=True)
+
+        self.assertEqual(results[0]["title"], "Help!")
+        mock_ai_plan.assert_not_called()
+
+    @override_settings(AI_SEARCH_ENABLED=True, OPENAI_API_KEY="test-key")
+    @patch("core.services.lyrics_service.build_ai_search_queries")
+    @patch("core.services.lyrics_service._lrclib.search")
+    def test_ai_enabled_empty_results_calls_openai_and_queries_lrclib(self, mock_search, mock_ai_plan):
+        def fake_search(**kwargs):
+            query = kwargs.get("query")
+            if query == "Mama just killed a man":
+                return [
+                    _lrclib_item(
+                        track_id=92,
+                        title="Bohemian Rhapsody",
+                        artist="Queen",
+                        plain_lyrics="Mama, just killed a man",
+                    )
+                ]
+            return []
+
+        mock_search.side_effect = fake_search
+        mock_ai_plan.return_value = {
+            "queries": ["Mama just killed a man", "Queen Bohemian Rhapsody"],
+            "detected_artist": "Queen",
+            "detected_title": "Bohemian Rhapsody",
+            "confidence": 0.86,
+        }
+
+        results = search_candidates(q="мама just killed a man queen", artist=None, limit=5, allow_ai=True)
+
+        self.assertEqual(results[0]["artist"], "Queen")
+        mock_ai_plan.assert_called_once()
+        searched_queries = [call.kwargs.get("query") for call in mock_search.call_args_list if call.kwargs.get("query")]
+        self.assertIn("Mama just killed a man", searched_queries)
+        self.assertIn("Queen Bohemian Rhapsody", searched_queries)
+
+    @override_settings(AI_SEARCH_ENABLED=True, OPENAI_API_KEY="test-key")
+    @patch("core.services.lyrics_service.build_ai_search_queries")
+    @patch("core.services.lyrics_service._lrclib.search")
+    def test_ai_results_are_merged_and_deduped(self, mock_search, mock_ai_plan):
+        def fake_search(**kwargs):
+            query = kwargs.get("query")
+            if query == "apple bottom jeans":
+                return [_lrclib_item(track_id=93, title="Low", artist="Flo Rida", plain_lyrics="Apple Bottom jeans")]
+            if query == "low flo rida":
+                return [_lrclib_item(track_id=93, title="Low", artist="Flo Rida", plain_lyrics="Apple Bottom jeans")]
+            return []
+
+        mock_search.side_effect = fake_search
+        mock_ai_plan.return_value = {
+            "queries": ["apple bottom jeans", "low flo rida"],
+            "detected_artist": "Flo Rida",
+            "detected_title": "Low",
+            "confidence": 0.71,
+        }
+
+        results = search_candidates(q="там что-то про apple bottom jeans", artist=None, limit=5, allow_ai=True)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["title"], "Low")
+
+    @override_settings(AI_SEARCH_ENABLED=True, OPENAI_API_KEY="test-key")
+    @patch("core.services.lyrics_service.build_ai_search_queries", side_effect=RuntimeError("planner failed"))
+    @patch("core.services.lyrics_service._lrclib.search")
+    def test_ai_exception_does_not_break_search(self, mock_search, mock_ai_plan):
+        mock_search.return_value = []
+
+        results = search_candidates(q="queen богемская рапсодия", artist=None, limit=5, allow_ai=True)
+
+        self.assertEqual(results, [])
+        mock_ai_plan.assert_called_once()
+
+    @override_settings(AI_SEARCH_ENABLED=True, OPENAI_API_KEY="test-key")
+    @patch("core.services.lyrics_service.build_ai_search_queries")
+    @patch("core.services.lyrics_service._lrclib.search")
+    def test_ai_plan_cache_prevents_repeat_openai_calls_for_same_query(self, mock_search, mock_ai_plan):
+        def fake_search(**kwargs):
+            if kwargs.get("query") == "i walk a lonely road":
+                return [
+                    _lrclib_item(
+                        track_id=94,
+                        title="Boulevard of Broken Dreams",
+                        artist="Green Day",
+                        plain_lyrics="I walk a lonely road",
+                    )
+                ]
+            return []
+
+        mock_search.side_effect = fake_search
+        mock_ai_plan.return_value = {
+            "queries": ["i walk a lonely road"],
+            "detected_artist": "",
+            "detected_title": "",
+            "confidence": 0.22,
+        }
+
+        search_candidates(q="песня где поется i walk a lonely road", artist=None, limit=5, allow_ai=True)
+        search_candidates(q="песня где поется i walk a lonely road", artist=None, limit=5, allow_ai=True)
+
+        mock_ai_plan.assert_called_once()
 
 
 class BaseTelegramAuthTestCase(TestCase):
@@ -594,6 +770,24 @@ class SearchViewTests(TestCase):
 
 
 class SearchApiTests(TestCase):
+    @patch("core.api_views.search_candidates")
+    def test_api_search_without_ai_flag_does_not_enable_ai_search(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+
+        response = self.client.get(reverse("api_lyrics_search"), {"q": "beatles help"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(mock_search_candidates.call_args.kwargs["allow_ai"])
+
+    @patch("core.api_views.search_candidates")
+    def test_api_search_with_ai_flag_enables_ai_search(self, mock_search_candidates):
+        mock_search_candidates.return_value = []
+
+        response = self.client.get(reverse("api_lyrics_search"), {"q": "песня где поется i walk a lonely road", "ai": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mock_search_candidates.call_args.kwargs["allow_ai"])
+
     @patch("core.services.providers.lrclib.requests.Session.get")
     def test_api_search_returns_controlled_503_on_connection_error(self, mock_get):
         mock_get.side_effect = requests.exceptions.ConnectionError("Failed to resolve 'lrclib.net'")
