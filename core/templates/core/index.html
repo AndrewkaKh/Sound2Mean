@@ -1,6 +1,6 @@
 {% extends 'core/base.html' %}
 
-{% block title %}Sound2Mean — поиск песен{% endblock %}
+{% block title %}Sound2Mean - поиск песен{% endblock %}
 
 {% block content %}
 <section class="hero">
@@ -14,12 +14,12 @@
         <button type="submit">Найти</button>
     </form>
 
-    {% if last_queries %}
+    {% if tg_user and last_queries %}
         <div class="recent-searches">
-            <h3>Недавние запросы:</h3>
+            <h3>Последние запросы:</h3>
             <ul>
                 {% for q in last_queries %}
-                    <li>{{ q }}</li>
+                    <li><a href="{% url 'search' %}?q={{ q|urlencode }}">{{ q }}</a></li>
                 {% endfor %}
             </ul>
         </div>

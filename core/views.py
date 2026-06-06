@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib import messages
 from django.core.cache import cache
+from django.db import DatabaseError
 from django.http import Http404
 from django.shortcuts import redirect, render
 import requests
@@ -20,7 +21,8 @@ from .services.flashcards import (
     set_deck_mode,
     toggle_shuffle,
 )
-from .services.lyrics_service import get_song, search_candidates
+from .services.lyrics_service import consume_last_provider_error, get_song, parse_artist_title_query, search_candidates
+from .services.search_history import get_recent_queries_for_user, save_user_query
 from .services.login_code import verify_code
 from .services.telegram_bot import TelegramBotError
 from .services.telegram_users import find_by_username, send_login_code
@@ -84,8 +86,8 @@ SONGS = [
 
 
 def index(request):
-    """Главная страница с поиском и недавними запросами."""
-    last_queries = request.session.get("last_queries", [])
+    telegram_user = _get_current_telegram_user(request)
+    last_queries = get_recent_queries_for_user(telegram_user) if telegram_user else []
     context = {
         "last_queries": last_queries,
     }
@@ -96,6 +98,18 @@ def _save_telegram_session(request, payload: dict) -> None:
     request.session["tg_user"] = payload
     request.session.pop("tg_username", None)
     request.session.modified = True
+
+
+def _get_current_telegram_user(request) -> TelegramUser | None:
+    payload = request.session.get("tg_user") or {}
+    telegram_id = payload.get("id")
+    if not telegram_id:
+        return None
+
+    try:
+        return TelegramUser.objects.filter(telegram_id=telegram_id).first()
+    except DatabaseError:
+        return None
 
 
 def login_view(request):
@@ -122,8 +136,8 @@ def login_view(request):
                     request.session["login_code_pending"] = True
                     code_sent = True
                     messages.success(request, "Код отправлен в Telegram.")
-                except TelegramBotError as e:
-                    messages.error(request, str(e))
+                except TelegramBotError as exc:
+                    messages.error(request, str(exc))
         elif action == "login":
             user = find_by_username(username_value)
             if not user:
@@ -264,16 +278,13 @@ def flashcards(request):
 
 def search(request):
     query = (request.GET.get("q") or "").strip()
-
-    # optional: если есть отдельные поля (можешь добавить позже на фронте)
     artist = (request.GET.get("artist") or "").strip()
     track_name = (request.GET.get("track_name") or "").strip()
+    parsed_query = parse_artist_title_query(query) if query else None
 
-    # если у тебя один инпут, удобно поддержать формат: "Queen - We Will Rock You"
-    if not artist and not track_name and " - " in query:
-        left, right = query.split(" - ", 1)
-        artist = left.strip()
-        track_name = right.strip()
+    if not artist and not track_name and parsed_query:
+        artist = parsed_query["artist"]
+        track_name = parsed_query["track_name"]
 
     results = search_candidates(
         q=query or None,
@@ -281,62 +292,81 @@ def search(request):
         track_name=track_name or None,
         limit=5,
     )
-    
-    for s in results:
-        sid = s.get("id")
-        if not sid:
+    provider_error = consume_last_provider_error()
+    if provider_error is not None:
+        messages.error(request, "Сервис поиска текстов временно недоступен. Попробуйте позже.")
+
+    for song in results:
+        song_id = song.get("id")
+        if not song_id:
             continue
         cache.set(
-            f"s2m:song:{sid}",
+            f"s2m:song:{song_id}",
             {
-                "id": sid,
-                "title": s.get("title"),
-                "artist": s.get("artist"),
-                "album": s.get("album"),
-                "duration": s.get("duration"),
-                "plainLyrics": s.get("_plainLyrics") or "",
-                "syncedLyrics": s.get("_syncedLyrics") or "",
+                "id": song_id,
+                "title": song.get("title"),
+                "artist": song.get("artist"),
+                "album": song.get("album"),
+                "duration": song.get("duration"),
+                "plainLyrics": song.get("_plainLyrics") or "",
+                "syncedLyrics": song.get("_syncedLyrics") or "",
             },
-            60 * 30,  # 30 минут
+            60 * 30,
         )
-    
-    # сохраняем историю (как раньше)
-    last_queries = request.session.get("last_queries", [])
-    if query and query not in last_queries:
-        last_queries.insert(0, query)
-        request.session["last_queries"] = last_queries[:5]
 
-    return render(request, "core/search_results.html", {
-        "query": query,
-        "results": results,
-    })
+    telegram_user = _get_current_telegram_user(request)
+    if telegram_user:
+        save_user_query(telegram_user, query)
+    else:
+        last_queries = request.session.get("last_queries", [])
+        normalized_query = " ".join(query.lower().split())
+        normalized_history = {" ".join(item.lower().split()): item for item in last_queries}
+        if normalized_query:
+            if normalized_query in normalized_history:
+                last_queries = [item for item in last_queries if " ".join(item.lower().split()) != normalized_query]
+            last_queries.insert(0, " ".join(query.split()))
+            request.session["last_queries"] = last_queries[:5]
+
+    return render(
+        request,
+        "core/search_results.html",
+        {
+            "query": query,
+            "results": results,
+            "parsed_artist": parsed_query["artist"] if parsed_query else "",
+            "parsed_track_name": parsed_query["track_name"] if parsed_query else "",
+        },
+    )
 
 
 def song_detail(request, song_id: int):
-    # 1) Сначала пробуем из кэша (после поиска)
     cached = cache.get(f"s2m:song:{song_id}")
     if cached and (cached.get("plainLyrics") or cached.get("syncedLyrics")):
         lyrics_en = (cached.get("plainLyrics") or cached.get("syncedLyrics") or "").splitlines()
-        # Перевода пока нет — заполним пустыми строками, чтобы layout был 1:1
         lyrics_ru = [""] * len(lyrics_en)
         lines = list(zip(lyrics_en, lyrics_ru))
-        return render(request, "core/song_detail.html", {
-            "song": cached,
-            "lines": lines,  # как у вас было раньше
-            "provider_error": None,
-        })
+        return render(
+            request,
+            "core/song_detail.html",
+            {
+                "song": cached,
+                "lines": lines,
+                "provider_error": None,
+            },
+        )
 
-    # 2) Если кэша нет (пользователь открыл прямую ссылку) — fallback на LRCLIB /get
     try:
         song = get_song(song_id)
-    except requests.exceptions.RequestException as e:
-        # ВАЖНО: не ломаем страницу, но и формат не меняем
-        # Покажем ошибку и пустые колонки
-        return render(request, "core/song_detail.html", {
-            "song": {"title": "Провайдер недоступен", "artist": "", "album": "", "duration": None},
-            "lines": [],
-            "provider_error": f"{type(e).__name__}: {e}",
-        })
+    except requests.exceptions.RequestException as exc:
+        return render(
+            request,
+            "core/song_detail.html",
+            {
+                "song": {"title": "Провайдер недоступен", "artist": "", "album": "", "duration": None},
+                "lines": [],
+                "provider_error": f"{type(exc).__name__}: {exc}",
+            },
+        )
 
     if not song:
         raise Http404("Song not found")
@@ -344,8 +374,12 @@ def song_detail(request, song_id: int):
     lyrics_en = (song.get("plainLyrics") or song.get("syncedLyrics") or "").splitlines()
     lyrics_ru = [""] * len(lyrics_en)
     lines = list(zip(lyrics_en, lyrics_ru))
-    return render(request, "core/song_detail.html", {
-        "song": song,
-        "lines": lines,
-        "provider_error": None,
-    })
+    return render(
+        request,
+        "core/song_detail.html",
+        {
+            "song": song,
+            "lines": lines,
+            "provider_error": None,
+        },
+    )

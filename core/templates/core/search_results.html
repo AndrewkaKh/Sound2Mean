@@ -14,6 +14,12 @@
       <div class="search-query">Пустой запрос.</div>
     {% endif %}
 
+    {% if parsed_artist and parsed_track_name %}
+      <p style="margin-top: 10px;">
+        Распознано как: <strong>{{ parsed_artist }}</strong> — <strong>{{ parsed_track_name }}</strong>
+      </p>
+    {% endif %}
+
     {% if results %}
       <div class="cards">
         {% for s in results %}
@@ -21,7 +27,6 @@
             <h3 class="card-title">{{ s.title }}</h3>
             <div class="card-artist">{{ s.artist }}</div>
 
-            {# album используем как "жанр/метку", чтобы не ломать дизайн #}
             {% if s.album %}
               <div class="card-genre">{{ s.album }}</div>
             {% else %}
@@ -37,7 +42,9 @@
         {% endfor %}
       </div>
     {% else %}
-      <p style="margin-top: 18px;">Ничего не найдено.</p>
+      <p style="margin-top: 18px;">
+        Ничего не найдено. Попробуйте указать исполнителя или часть строки из песни.
+      </p>
     {% endif %}
   </section>
 {% endblock %}

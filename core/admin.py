@@ -1,6 +1,5 @@
 from django.contrib import admin
-
-from .models import TelegramUser, VocabularyWord
+from .models import TelegramUser, VocabularyWord, SearchHistory
 
 
 @admin.register(TelegramUser)
@@ -14,3 +13,8 @@ class VocabularyWordAdmin(admin.ModelAdmin):
     list_display = ("word_en", "word_ru", "is_favorite", "user")
     list_filter = ("user", "is_favorite")
     search_fields = ("word_en", "word_ru", "user__username")
+@admin.register(SearchHistory)
+class SearchHistoryAdmin(admin.ModelAdmin):
+    list_display = ("user", "query", "normalized_query", "created_at")
+    search_fields = ("query", "normalized_query", "user__username", "user__telegram_id")
+    list_filter = ("created_at",)

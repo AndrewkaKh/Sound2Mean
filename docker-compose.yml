@@ -11,7 +11,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       DJANGO_DEBUG: "1"
-      TELEGRAM_PROXY: "http://host.docker.internal:12334"
+      TELEGRAM_PROXY: "${TELEGRAM_PROXY:-}"
       NO_PROXY: "localhost,127.0.0.1,web,bot"
     command: >
       sh -c "python manage.py migrate --noinput &&
@@ -26,7 +26,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      TELEGRAM_PROXY: "http://host.docker.internal:12334"
+      TELEGRAM_PROXY: "${TELEGRAM_PROXY:-}"
       NO_PROXY: "localhost,127.0.0.1,web,bot"
     command: python manage.py run_telegram_bot
     depends_on:

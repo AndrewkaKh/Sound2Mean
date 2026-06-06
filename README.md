@@ -51,3 +51,42 @@
 ---
 
 *"Музыка — это язык, который понимают все. Мы просто помогаем понять слова."*
+## Translation Setup
+
+The project reads translation settings from the root `.env` file on startup.
+
+Supported providers:
+
+- `TRANSLATION_PROVIDER=mock` for a visible local fallback without external API calls
+- `TRANSLATION_PROVIDER=openai` for real translation through the OpenAI Responses API
+
+Example `.env` for OpenAI:
+
+```env
+TRANSLATION_PROVIDER=openai
+TRANSLATION_TARGET_LANGUAGE=ru
+TRANSLATION_TIMEOUT=20
+TRANSLATION_MODEL=gpt-4o-mini
+TRANSLATION_API_KEY=your_openai_api_key
+```
+
+Example `.env` for a safe local stub:
+
+```env
+TRANSLATION_PROVIDER=mock
+TRANSLATION_TARGET_LANGUAGE=ru
+TRANSLATION_TIMEOUT=20
+TRANSLATION_MODEL=gpt-4o-mini
+TRANSLATION_API_KEY=
+```
+
+If `TRANSLATION_PROVIDER` is empty, the page still works:
+English lyrics are shown, and the UI displays a soft message that translation is not configured.
+
+Variables used by the translation feature:
+
+- `TRANSLATION_PROVIDER`
+- `TRANSLATION_TARGET_LANGUAGE`
+- `TRANSLATION_TIMEOUT`
+- `TRANSLATION_MODEL`
+- `TRANSLATION_API_KEY`
