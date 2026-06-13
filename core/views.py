@@ -24,7 +24,7 @@ from .services.flashcards import (
     toggle_shuffle,
 )
 from .services.lyrics_service import consume_last_provider_error, get_song, parse_artist_title_query, search_candidates
-from .services.search_history import get_recent_queries_for_user, save_user_query
+from .services.search_history import delete_user_query, get_recent_queries_for_user, save_user_query
 from .services.login_code import verify_code
 from .services.telegram_bot import TelegramBotError
 from .services.telegram_users import find_by_username, send_login_code
@@ -103,6 +103,21 @@ def index(request):
         "last_queries": last_queries,
     }
     return render(request, "core/index.html", context)
+
+
+def delete_recent_query(request):
+    if request.method != "POST":
+        return redirect("index")
+
+    telegram_user = _get_current_telegram_user(request)
+    if not telegram_user:
+        return redirect("login")
+
+    query = (request.POST.get("q") or "").strip()
+    if query:
+        delete_user_query(telegram_user, query)
+
+    return redirect("index")
 
 
 def _save_telegram_session(request, payload: dict) -> None:

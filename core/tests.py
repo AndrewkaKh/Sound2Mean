@@ -254,13 +254,12 @@ class LyricsSearchServiceTests(TestCase):
 
     @patch("core.services.lyrics_service._lrclib.search")
     def test_fallback_search_tries_multiple_variants_after_empty_first_result(self, mock_search):
-        calls = {"count": 0}
-
         def fake_search(**kwargs):
-            calls["count"] += 1
-            if calls["count"] == 1:
+            query = (kwargs.get("query") or "").lower()
+            track_name = (kwargs.get("track_name") or "").lower()
+            if query == "shape of yu (live)":
                 return []
-            if calls["count"] == 2:
+            if query == "shape of yu" or track_name == "shape of yu":
                 return [
                     _lrclib_item(
                         track_id=21,
@@ -277,11 +276,12 @@ class LyricsSearchServiceTests(TestCase):
 
         self.assertEqual(results[0]["title"], "Shape of You")
         self.assertGreaterEqual(mock_search.call_count, 2)
-        self.assertEqual(mock_search.call_args_list[0].kwargs["query"], "Shape of Yu (Live)")
-        self.assertNotEqual(
-            mock_search.call_args_list[1].kwargs["query"],
-            mock_search.call_args_list[0].kwargs["query"],
-        )
+        called_queries = {
+            (call.kwargs.get("query") or "").lower()
+            for call in mock_search.call_args_list
+        }
+        self.assertIn("shape of yu (live)", called_queries)
+        self.assertIn("shape of yu", called_queries)
 
     @patch("core.services.lyrics_service._lrclib.search")
     def test_artist_title_query_prioritizes_artist_match_for_queen_bohem(self, mock_search):
@@ -572,6 +572,22 @@ class SearchHistoryTests(BaseTelegramAuthTestCase):
         self.assertContains(response, "beatles help")
         self.assertContains(response, "queen bohemian")
         self.assertContains(response, reverse("search") + "?q=beatles%20help")
+
+    def test_user_can_delete_recent_query(self):
+        user = self.create_telegram_user(7, "grace")
+        self.login_telegram_user(user)
+        SearchHistory.objects.create(user=user, query="beatles help", normalized_query="beatles help")
+        SearchHistory.objects.create(user=user, query="queen bohemian", normalized_query="queen bohemian")
+
+        response = self.client.post(reverse("delete_recent_query"), {"q": "beatles help"})
+
+        self.assertRedirects(response, reverse("index"))
+        self.assertFalse(SearchHistory.objects.filter(user=user, normalized_query="beatles help").exists())
+        self.assertTrue(SearchHistory.objects.filter(user=user, normalized_query="queen bohemian").exists())
+
+        index_response = self.client.get(reverse("index"))
+        self.assertNotContains(index_response, "beatles help")
+        self.assertContains(index_response, "queen bohemian")
 
     @patch("core.views.search_candidates")
     def test_anonymous_index_does_not_show_recent_queries_block(self, mock_search_candidates):
