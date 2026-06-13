@@ -1,3 +1,4 @@
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -80,24 +81,41 @@ class LrcLibClient:
         user_agent: str = "Sound2Mean/0.1",
     ):
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update(
+        self._user_agent = user_agent
+        self._local = threading.local()
+
+    def _build_session(self, *, max_retries: int) -> requests.Session:
+        session = requests.Session()
+        session.headers.update(
             {
-                "User-Agent": user_agent,
+                "User-Agent": self._user_agent,
                 "Accept": "application/json",
                 "Connection": "close",
             }
         )
 
         retry = Retry(
-            total=3,
-            backoff_factor=0.4,
+            total=max_retries,
+            backoff_factor=0.3,
             status_forcelist=(429, 500, 502, 503, 504),
             allowed_methods=("GET",),
             raise_on_status=False,
         )
         adapter = HTTPAdapter(max_retries=retry)
-        self.session.mount("https://", adapter)
+        session.mount("https://", adapter)
+        return session
+
+    def _session(self, *, max_retries: int) -> requests.Session:
+        sessions = getattr(self._local, "sessions", None)
+        if sessions is None:
+            sessions = {}
+            self._local.sessions = sessions
+
+        session = sessions.get(max_retries)
+        if session is None:
+            session = self._build_session(max_retries=max_retries)
+            sessions[max_retries] = session
+        return session
 
     def search(
         self,
@@ -118,7 +136,11 @@ class LrcLibClient:
             params["album_name"] = album_name
 
         try:
-            response = self.session.get(f"{self.BASE_URL}/search", params=params, timeout=self.timeout)
+            response = self._session(max_retries=0).get(
+                f"{self.BASE_URL}/search",
+                params=params,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
         except requests.exceptions.Timeout as exc:
             _raise_lrclib_error(exc)
@@ -134,7 +156,11 @@ class LrcLibClient:
 
     def get(self, track_id: int) -> Optional[Dict[str, Any]]:
         try:
-            response = self.session.get(f"{self.BASE_URL}/get", params={"id": track_id}, timeout=self.timeout)
+            response = self._session(max_retries=2).get(
+                f"{self.BASE_URL}/get",
+                params={"id": track_id},
+                timeout=self.timeout,
+            )
             if response.status_code == 404:
                 return None
             response.raise_for_status()

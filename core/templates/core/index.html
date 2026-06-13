@@ -19,7 +19,22 @@
             <h3>Последние запросы:</h3>
             <ul>
                 {% for q in last_queries %}
-                    <li><a href="{% url 'search' %}?q={{ q|urlencode }}">{{ q }}</a></li>
+                    <li class="recent-searches__item">
+                        <a class="recent-searches__link" href="{% url 'search' %}?q={{ q|urlencode }}">{{ q }}</a>
+                        <form
+                            class="recent-searches__remove-form"
+                            method="post"
+                            action="{% url 'delete_recent_query' %}"
+                        >
+                            {% csrf_token %}
+                            <input type="hidden" name="q" value="{{ q }}">
+                            <button
+                                type="submit"
+                                class="recent-searches__remove"
+                                aria-label="Удалить запрос «{{ q }}»"
+                            >×</button>
+                        </form>
+                    </li>
                 {% endfor %}
             </ul>
         </div>

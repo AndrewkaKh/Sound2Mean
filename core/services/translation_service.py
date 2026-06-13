@@ -8,6 +8,8 @@ from typing import List
 from django.conf import settings
 import requests
 
+from .http_proxy import get_proxy_request_kwargs
+
 logger = logging.getLogger(__name__)
 SUPPORTED_TRANSLATION_PROVIDERS = {"mock", "openai"}
 OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses"
@@ -119,6 +121,11 @@ def _raise_openai_error(response: requests.Response) -> None:
     )
 
     if response.status_code in {401, 403}:
+        if "not supported" in message.lower() or "country" in message.lower():
+            raise TranslationServiceError(
+                "OpenAI недоступен из вашего региона. Укажите TELEGRAM_PROXY в .env "
+                "(тот же прокси, что для Telegram)."
+            )
         raise TranslationServiceError("OpenAI API key отклонён. Проверьте TRANSLATION_API_KEY")
     if response.status_code == 429:
         raise TranslationServiceError("OpenAI временно ограничил запросы. Попробуйте позже")
@@ -159,6 +166,7 @@ def _translate_with_openai(lines: List[str], api_key: str) -> List[str]:
             },
             json=request_payload,
             timeout=timeout,
+            **get_proxy_request_kwargs(),
         )
     except requests.exceptions.RequestException as exc:
         logger.warning("OpenAI translation request failed before response: %s", exc)

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sound2mean"
+version = "0.1.0"
+description = "Django project for song lyrics search, translation, and Telegram-based learning."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "Django==6.0",
+    "asgiref==3.11.0",
+    "certifi==2026.1.4",
+    "charset-normalizer==3.4.4",
+    "idna==3.11",
+    "lxml==6.0.2",
+    "openai",
+    "requests==2.32.5",
+    "sqlparse==0.5.4",
+    "tzdata==2025.2",
+    "urllib3==2.6.3",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["core*", "sound2mean_project*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "sound2mean_project.settings"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+testpaths = ["core", "sound2mean_project"]
+
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.3"
+pytest-django = ">=4.9"

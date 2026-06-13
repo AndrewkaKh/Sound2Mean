@@ -56,3 +56,21 @@ def save_user_query(user: Optional[TelegramUser], query: str, limit: int = MAX_H
                 SearchHistory.objects.filter(user=user, id__in=stale_ids).delete()
     except DatabaseError:
         return
+
+
+def delete_user_query(user: Optional[TelegramUser], query: str) -> bool:
+    if not user:
+        return False
+
+    normalized_query = normalize_history_query(query)
+    if not normalized_query:
+        return False
+
+    try:
+        deleted, _ = SearchHistory.objects.filter(
+            user=user,
+            normalized_query=normalized_query,
+        ).delete()
+        return deleted > 0
+    except DatabaseError:
+        return False

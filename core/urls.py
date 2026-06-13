@@ -5,6 +5,7 @@ from . import api_views
 urlpatterns = [
     # HTML pages
     path("", views.index, name="index"),
+    path("recent-queries/delete/", views.delete_recent_query, name="delete_recent_query"),
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
     path("flashcards/", views.flashcards, name="flashcards"),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import ContextVar
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 SEARCH_TTL_SECONDS = 60 * 30
 SEARCH_LYRICS_TTL_SECONDS = 60 * 30
 GET_TTL_SECONDS = 60 * 60 * 24 * 7
+STRONG_MATCH_SCORE = 0.72
+SEARCH_PARALLEL_WORKERS = 4
 
 _WORD_RE = re.compile(r"[a-zA-Z']+")
 _DASH_RE = re.compile(r"[\u2010\u2011\u2012\u2013\u2014\u2212]+")
@@ -629,26 +632,118 @@ def _rank_raw_results(
     return top
 
 
+def _needs_fallback_search(top: List[Tuple[float, Dict[str, Any]]]) -> bool:
+    if not top:
+        return True
+    return top[0][0] < STRONG_MATCH_SCORE
+
+
+def _is_search_satisfied(top: List[Tuple[float, Dict[str, Any]]]) -> bool:
+    if not top:
+        return False
+    return top[0][0] >= STRONG_MATCH_SCORE
+
+
+def _run_lrclib_search(**attempt: Optional[str]) -> List[Dict[str, Any]]:
+    return _lrclib.search(**attempt)
+
+
+def _rank_pool(
+    pool: Dict[Tuple[str, str], Dict[str, Any]],
+    *,
+    limit: int,
+    context: Dict[str, str],
+    ai_artist_query: str = "",
+    ai_track_query: str = "",
+) -> List[Tuple[float, Dict[str, Any]]]:
+    return _rank_raw_results(
+        pool,
+        limit=limit,
+        query=context["query"],
+        query_search=context["query_search"],
+        artist_query=context["artist_query"],
+        track_query=context["track_query"],
+        strict_artist_title=bool(context["strict_artist_title"]),
+        ai_artist_query=ai_artist_query,
+        ai_track_query=ai_track_query,
+    )
+
+
 def _collect_search_results(
     attempts: List[Dict[str, Optional[str]]],
     pool: Dict[Tuple[str, str], Dict[str, Any]],
-) -> int:
+) -> List[LRCLibError]:
+    if not attempts:
+        return []
+
     before = len(pool)
-    for attempt in attempts:
-        results = _lrclib.search(**attempt)
-        _merge_raw_results(pool, results)
-    return max(0, len(pool) - before)
+    errors: List[LRCLibError] = []
+
+    if len(attempts) == 1:
+        try:
+            results = _run_lrclib_search(**attempts[0])
+        except LRCLibError as exc:
+            errors.append(exc)
+        else:
+            _merge_raw_results(pool, results)
+        return errors
+
+    max_workers = min(len(attempts), SEARCH_PARALLEL_WORKERS)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_run_lrclib_search, **attempt) for attempt in attempts]
+        for future in as_completed(futures):
+            try:
+                results = future.result()
+            except LRCLibError as exc:
+                errors.append(exc)
+                continue
+            _merge_raw_results(pool, results)
+
+    if errors and len(pool) == before:
+        logger.warning(
+            "LRCLIB search wave failed for all %s attempts: %s",
+            len(attempts),
+            errors[0],
+        )
+
+    return errors
 
 
 def _collect_ai_search_results(
     ai_queries: List[str],
     pool: Dict[Tuple[str, str], Dict[str, Any]],
-) -> int:
-    before = len(pool)
-    for ai_query in ai_queries:
-        results = _lrclib.search(query=ai_query)
-        _merge_raw_results(pool, results)
-    return max(0, len(pool) - before)
+) -> List[LRCLibError]:
+    if not ai_queries:
+        return []
+
+    attempts = [{"query": ai_query} for ai_query in ai_queries]
+    return _collect_search_results(attempts, pool)
+
+
+def _collect_primary_search_results(
+    attempts: List[Dict[str, Optional[str]]],
+    pool: Dict[Tuple[str, str], Dict[str, Any]],
+    *,
+    limit: int,
+    context: Dict[str, str],
+) -> Tuple[List[Tuple[float, Dict[str, Any]]], List[LRCLibError]]:
+    errors: List[LRCLibError] = []
+    if not attempts:
+        return [], errors
+
+    if context["strict_artist_title"]:
+        errors.extend(_collect_search_results([attempts[0]], pool))
+        top = _rank_pool(pool, limit=limit, context=context)
+        if _is_search_satisfied(top):
+            return top, errors
+
+        if len(attempts) > 1:
+            errors.extend(_collect_search_results(attempts[1:], pool))
+            top = _rank_pool(pool, limit=limit, context=context)
+        return top, errors
+
+    errors.extend(_collect_search_results(attempts, pool))
+    return _rank_pool(pool, limit=limit, context=context), errors
 
 
 def search_candidates(
@@ -675,66 +770,51 @@ def search_candidates(
         track_name=track_name,
     )
 
-    try:
-        pool: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        _collect_search_results(primary_attempts, pool)
+    pool: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    provider_errors: List[LRCLibError] = []
 
-        top = _rank_raw_results(
-            pool,
-            limit=limit,
-            query=context["query"],
-            query_search=context["query_search"],
-            artist_query=context["artist_query"],
-            track_query=context["track_query"],
-            strict_artist_title=bool(context["strict_artist_title"]),
-        )
+    top, primary_errors = _collect_primary_search_results(
+        primary_attempts,
+        pool,
+        limit=limit,
+        context=context,
+    )
+    provider_errors.extend(primary_errors)
 
-        best_score = top[0][0] if top else 0.0
-        needs_fallback = not top or len(top) < limit or best_score < 0.72
-        if needs_fallback and fallback_attempts:
-            _collect_search_results(fallback_attempts, pool)
-            top = _rank_raw_results(
+    if _needs_fallback_search(top) and fallback_attempts:
+        provider_errors.extend(_collect_search_results(fallback_attempts, pool))
+        top = _rank_pool(pool, limit=limit, context=context)
+
+    candidates_before_ai = [_simplify_candidate(item, score) for score, item in top]
+    user_query = q or track_name or " ".join(part for part in [artist or "", track_name or ""] if part)
+    if should_use_ai_search(user_query, candidates_before_ai, allow_ai=allow_ai):
+        logger.info("AI search called for '%s'", _norm(user_query))
+        try:
+            ai_plan = build_ai_search_queries(user_query, limit=5)
+        except Exception:
+            logger.exception("AI search planner crashed for '%s'", _norm(user_query))
+            ai_plan = {"queries": [], "detected_artist": "", "detected_title": "", "confidence": 0.0}
+        ai_queries = ai_plan.get("queries") or []
+        if ai_queries:
+            logger.info("AI planner queries for '%s': %s", _norm(user_query), ai_queries)
+            before_ai = len(pool)
+            provider_errors.extend(_collect_ai_search_results(ai_queries, pool))
+            added_count = max(0, len(pool) - before_ai)
+            logger.info("AI search added %s merged LRCLIB candidates for '%s'", added_count, _norm(user_query))
+            top = _rank_pool(
                 pool,
                 limit=limit,
-                query=context["query"],
-                query_search=context["query_search"],
-                artist_query=context["artist_query"],
-                track_query=context["track_query"],
-                strict_artist_title=bool(context["strict_artist_title"]),
+                context=context,
+                ai_artist_query=normalize_search_text(ai_plan.get("detected_artist", ""), strip_parenthetical=True),
+                ai_track_query=normalize_search_text(ai_plan.get("detected_title", ""), strip_parenthetical=True),
             )
-
-        candidates_before_ai = [_simplify_candidate(item, score) for score, item in top]
-        user_query = q or track_name or " ".join(part for part in [artist or "", track_name or ""] if part)
-        if should_use_ai_search(user_query, candidates_before_ai, allow_ai=allow_ai):
-            logger.info("AI search called for '%s'", _norm(user_query))
-            try:
-                ai_plan = build_ai_search_queries(user_query, limit=5)
-            except Exception:
-                logger.exception("AI search planner crashed for '%s'", _norm(user_query))
-                ai_plan = {"queries": [], "detected_artist": "", "detected_title": "", "confidence": 0.0}
-            ai_queries = ai_plan.get("queries") or []
-            if ai_queries:
-                logger.info("AI planner queries for '%s': %s", _norm(user_query), ai_queries)
-                added_count = _collect_ai_search_results(ai_queries, pool)
-                logger.info("AI search added %s merged LRCLIB candidates for '%s'", added_count, _norm(user_query))
-                top = _rank_raw_results(
-                    pool,
-                    limit=limit,
-                    query=context["query"],
-                    query_search=context["query_search"],
-                    artist_query=context["artist_query"],
-                    track_query=context["track_query"],
-                    strict_artist_title=bool(context["strict_artist_title"]),
-                    ai_artist_query=normalize_search_text(ai_plan.get("detected_artist", ""), strip_parenthetical=True),
-                    ai_track_query=normalize_search_text(ai_plan.get("detected_title", ""), strip_parenthetical=True),
-                )
-            else:
-                logger.info("AI search returned no extra queries for '%s'", _norm(user_query))
-    except LRCLibError as exc:
-        _set_last_provider_error(exc)
-        return []
+        else:
+            logger.info("AI search returned no extra queries for '%s'", _norm(user_query))
 
     candidates = [_simplify_candidate(item, score) for score, item in top]
+
+    if not candidates and provider_errors:
+        _set_last_provider_error(provider_errors[-1])
 
     lyrics_map: Dict[int, Dict[str, str]] = {}
     for score, item in top[: max(1, min(cache_lyrics_top, limit))]:

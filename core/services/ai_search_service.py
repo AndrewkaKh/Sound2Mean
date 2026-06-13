@@ -10,6 +10,8 @@ from django.conf import settings
 from django.core.cache import cache
 import requests
 
+from .http_proxy import get_proxy_request_kwargs
+
 logger = logging.getLogger(__name__)
 
 AI_SEARCH_PLAN_TTL_SECONDS = 60 * 60 * 24
@@ -176,6 +178,7 @@ def build_ai_search_queries(user_query: str, limit: int = 5) -> dict[str, Any]:
             },
             json=request_payload,
             timeout=timeout,
+            **get_proxy_request_kwargs(),
         )
         response.raise_for_status()
         payload = response.json()
