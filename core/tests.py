@@ -1,15 +1,40 @@
 import json
+from io import StringIO
+import time
 from unittest.mock import Mock, patch
 
 import requests
 from django.core.cache import cache
+from django.core.management import call_command
+from django.db import IntegrityError
+from django.http import HttpRequest
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import SearchHistory, SongTranslation, TelegramUser
+from .context_processors import telegram_auth
+from .models import SearchHistory, SongTranslation, TelegramUser, VocabularyWord
 from .services.ai_search_service import build_ai_search_queries
+from .services.flashcards import (
+    DECK_ALL,
+    DECK_FAVORITES,
+    advance_to_next,
+    can_advance,
+    get_current_word_id,
+    get_deck_mode,
+    get_deck_word_ids,
+    get_user_word_ids,
+    reset_queue,
+    set_deck_mode,
+    set_shuffle_enabled,
+    toggle_shuffle,
+)
+from .services.http_proxy import get_proxy_request_kwargs, normalize_proxy
 from .services.lyrics_service import normalize_search_text, parse_artist_title_query, search_candidates
+from .services.login_code import generate_code, store_code, verify_code
+from .services.providers.lrclib import LRCLibError
 from .services.search_history import normalize_history_query
+from .services.telegram_bot import TelegramBotError, _api_url, _normalize_proxy as normalize_bot_proxy, get_updates, send_message
+from .services.telegram_users import find_by_username, normalize_username, send_login_code, upsert_from_telegram
 from .services.translation_service import (
     TranslationServiceError,
     build_aligned_lines,
@@ -53,6 +78,10 @@ def _song_payload(song_id: int = 101, plain_lyrics: str = "I walk a lonely road\
         "plainLyrics": plain_lyrics,
         "syncedLyrics": "",
     }
+
+
+class _DummySession(dict):
+    modified = False
 
 
 class TranslationServiceTests(TestCase):
@@ -667,7 +696,7 @@ class SongDetailTranslationTests(TestCase):
 
         self.assertIn(
             '<div class="lyrics-line-pair" data-line-index="0">\n'
-            '              <div class="lyrics-table-cell lyrics-line-en">Line one</div>\n'
+            '              <div class="lyrics-table-cell lyrics-line-en" data-line-index="0">Line one</div>\n'
             '              <div class="lyrics-table-cell lyrics-line-ru">Перевод: Line one</div>\n'
             '            </div>',
             html,
@@ -832,3 +861,241 @@ class SearchApiTests(TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"][0]["title"], "Help!")
         self.assertEqual(payload["data"][0]["artist"], "The Beatles")
+
+
+class ModelTests(BaseTelegramAuthTestCase):
+    def test_telegram_user_display_name_and_str(self):
+        user = TelegramUser.objects.create(telegram_id=100, username="alice")
+        anonymous = TelegramUser.objects.create(telegram_id=101, username="")
+
+        self.assertEqual(str(user), "@alice")
+        self.assertEqual(user.display_name, "@alice")
+        self.assertEqual(str(anonymous), "tg:101")
+        self.assertEqual(anonymous.display_name, "ID 101")
+
+    def test_vocabulary_word_unique_per_user(self):
+        VocabularyWord.objects.create(user=self.create_telegram_user(102, "bob"), word_en="hello", word_ru="привет")
+
+        with self.assertRaises(IntegrityError):
+            VocabularyWord.objects.create(user=TelegramUser.objects.get(username="bob"), word_en="hello", word_ru="здравствуйте")
+
+
+class ContextProcessorTests(TestCase):
+    @override_settings(TELEGRAM_BOT_USERNAME="sound2mean_bot", TELEGRAM_BOT_TOKEN="secret")
+    def test_telegram_auth_context_processor(self):
+        request = HttpRequest()
+        request.session = {"tg_user": {"id": 1, "username": "alice"}}
+
+        context = telegram_auth(request)
+
+        self.assertEqual(context["tg_user"]["username"], "alice")
+        self.assertEqual(context["telegram_bot_username"], "sound2mean_bot")
+        self.assertTrue(context["telegram_bot_configured"])
+        self.assertEqual(context["telegram_bot_url"], "https://t.me/sound2mean_bot")
+
+
+class LoginCodeServiceTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_generate_code_returns_six_digits(self):
+        code = generate_code()
+
+        self.assertEqual(len(code), 6)
+        self.assertTrue(code.isdigit())
+
+    def test_store_and_verify_code_consumes_cache(self):
+        store_code(1001, "123456")
+
+        self.assertTrue(verify_code(1001, "123456"))
+        self.assertFalse(verify_code(1001, "123456"))
+        self.assertFalse(verify_code(1001, "654321"))
+
+
+class ProxyServiceTests(TestCase):
+    def test_normalize_proxy_supports_socks_and_local_https(self):
+        self.assertEqual(normalize_proxy("socks5://127.0.0.1:9050"), "socks5h://127.0.0.1:9050")
+        self.assertEqual(normalize_proxy("https://127.0.0.1:8080"), "http://127.0.0.1:8080")
+        self.assertEqual(normalize_proxy("https://host.docker.internal:8888"), "http://host.docker.internal:8888")
+
+    @override_settings(TELEGRAM_PROXY="socks5://127.0.0.1:9050")
+    def test_get_proxy_request_kwargs_uses_normalized_proxy(self):
+        kwargs = get_proxy_request_kwargs()
+
+        self.assertEqual(
+            kwargs,
+            {"proxies": {"http": "socks5h://127.0.0.1:9050", "https": "socks5h://127.0.0.1:9050"}},
+        )
+
+    @override_settings(TELEGRAM_PROXY="")
+    def test_get_proxy_request_kwargs_empty_without_proxy(self):
+        self.assertEqual(get_proxy_request_kwargs(), {})
+
+
+class TelegramUsersServiceTests(BaseTelegramAuthTestCase):
+    def test_normalize_username(self):
+        self.assertEqual(normalize_username(" @Alice "), "alice")
+        self.assertEqual(normalize_username(""), "")
+
+    def test_upsert_from_telegram_updates_existing_user(self):
+        first = upsert_from_telegram(telegram_id=5001, username="@Alice")
+        second = upsert_from_telegram(telegram_id=5001, username="@AliceNew")
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(second.username, "alicenew")
+
+    def test_find_by_username_uses_normalized_lookup(self):
+        user = self.create_telegram_user(5002, "charlie")
+
+        found = find_by_username("@Charlie")
+
+        self.assertEqual(found.pk, user.pk)
+
+    @patch("core.services.telegram_users.send_message")
+    @patch("core.services.telegram_users.store_code")
+    @patch("core.services.telegram_users.generate_code", return_value="123456")
+    def test_send_login_code_sends_message_and_stores_code(self, mock_code, mock_store, mock_send):
+        user = self.create_telegram_user(5003, "diana")
+
+        send_login_code(user)
+
+        mock_store.assert_called_once_with(user.telegram_id, "123456")
+        self.assertIn("123456", mock_send.call_args.args[1])
+
+
+class TelegramBotServiceTests(TestCase):
+    @override_settings(TELEGRAM_BOT_TOKEN="")
+    def test_api_url_requires_token(self):
+        with self.assertRaisesMessage(TelegramBotError, "TELEGRAM_BOT_TOKEN is not configured"):
+            _api_url("sendMessage")
+
+    def test_bot_proxy_normalization_matches_http_proxy_logic(self):
+        self.assertEqual(normalize_bot_proxy("socks5://127.0.0.1:9000"), "socks5h://127.0.0.1:9000")
+
+    @override_settings(TELEGRAM_BOT_TOKEN="token")
+    @patch("core.services.telegram_bot.requests.post")
+    def test_send_message_raises_on_request_exception(self, mock_post):
+        mock_post.side_effect = requests.RequestException("boom")
+
+        with self.assertRaises(TelegramBotError):
+            send_message(1, "hello")
+
+    @override_settings(TELEGRAM_BOT_TOKEN="token")
+    @patch("core.services.telegram_bot.requests.post")
+    def test_send_message_raises_on_telegram_error_payload(self, mock_post):
+        mock_response = Mock()
+        mock_response.json.return_value = {"ok": False, "description": "Forbidden"}
+        mock_post.return_value = mock_response
+
+        with self.assertRaisesMessage(TelegramBotError, "Forbidden"):
+            send_message(1, "hello")
+
+    @override_settings(TELEGRAM_BOT_TOKEN="token")
+    @patch("core.services.telegram_bot.requests.get")
+    def test_get_updates_returns_result(self, mock_get):
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"ok": True, "result": [{"update_id": 1}]}
+        mock_get.return_value = mock_response
+
+        updates = get_updates(offset=10, timeout=5)
+
+        self.assertEqual(updates, [{"update_id": 1}])
+        self.assertEqual(mock_get.call_args.kwargs["params"]["offset"], 10)
+
+    @override_settings(TELEGRAM_BOT_TOKEN="token")
+    @patch("core.services.telegram_bot.requests.get")
+    def test_get_updates_raises_on_request_exception(self, mock_get):
+        mock_get.side_effect = requests.RequestException("boom")
+
+        with self.assertRaisesMessage(TelegramBotError, "getUpdates failed"):
+            get_updates()
+
+
+class FlashcardsServiceTests(BaseTelegramAuthTestCase):
+    def setUp(self):
+        self.user = self.create_telegram_user(7001, "flash")
+        self.request = HttpRequest()
+        self.request.session = _DummySession()
+        self.request.session.modified = False
+        self.word1 = VocabularyWord.objects.create(user=self.user, word_en="one", word_ru="раз")
+        self.word2 = VocabularyWord.objects.create(user=self.user, word_en="two", word_ru="два", is_favorite=True)
+
+    def test_deck_mode_defaults_and_invalid_resets_to_all(self):
+        self.assertEqual(get_deck_mode(self.request), DECK_ALL)
+        set_deck_mode(self.request, "invalid")
+        self.assertEqual(get_deck_mode(self.request), DECK_ALL)
+
+    def test_set_deck_mode_resets_queue_on_change(self):
+        self.request.session["flashcard_current_id"] = self.word1.id
+
+        set_deck_mode(self.request, DECK_FAVORITES)
+
+        self.assertEqual(self.request.session["flashcard_mode"], DECK_FAVORITES)
+        self.assertNotIn("flashcard_current_id", self.request.session)
+
+    def test_shuffle_toggle_and_setter(self):
+        self.assertTrue(toggle_shuffle(self.request))
+        self.assertTrue(self.request.session["flashcard_shuffle"])
+        self.assertFalse(toggle_shuffle(self.request))
+        set_shuffle_enabled(self.request, True)
+        self.assertTrue(self.request.session["flashcard_shuffle"])
+
+    def test_get_user_word_ids_and_favorites(self):
+        self.assertEqual(get_user_word_ids(self.user), [self.word1.id, self.word2.id])
+        self.assertEqual(get_deck_word_ids(self.user, DECK_FAVORITES), [self.word2.id])
+        self.assertTrue(can_advance([1, 2]))
+        self.assertFalse(can_advance([1]))
+
+    def test_get_current_word_id_sets_initial_and_clears_missing(self):
+        current = get_current_word_id(self.request, [self.word1.id, self.word2.id])
+        self.assertEqual(current, self.word1.id)
+
+        self.request.session["flashcard_current_id"] = 999
+        current = get_current_word_id(self.request, [self.word1.id, self.word2.id])
+        self.assertEqual(current, self.word1.id)
+
+        self.assertIsNone(get_current_word_id(self.request, []))
+
+    def test_advance_to_next_sequential_and_single(self):
+        self.request.session["flashcard_current_id"] = self.word1.id
+        next_id = advance_to_next(self.request, [self.word1.id, self.word2.id])
+        self.assertEqual(next_id, self.word2.id)
+
+        only_id = advance_to_next(self.request, [self.word2.id])
+        self.assertEqual(only_id, self.word2.id)
+
+    @patch("core.services.flashcards.random.choice", return_value=2)
+    def test_advance_to_next_shuffle_avoids_current(self, mock_choice):
+        self.request.session["flashcard_current_id"] = self.word1.id
+        self.request.session["flashcard_shuffle"] = True
+
+        next_id = advance_to_next(self.request, [self.word1.id, self.word2.id])
+
+        self.assertEqual(next_id, 2)
+        mock_choice.assert_called_once()
+
+    def test_reset_queue_removes_current_id(self):
+        self.request.session["flashcard_current_id"] = self.word1.id
+        reset_queue(self.request)
+        self.assertNotIn("flashcard_current_id", self.request.session)
+
+
+class ApiGuardTests(TestCase):
+    @patch("core.api_views.get_song", side_effect=LRCLibError(code="provider_timeout", message="timeout", status=504))
+    def test_api_get_uses_lrclib_guard(self, mock_get_song):
+        response = self.client.get(reverse("api_lyrics_get"), {"id": "123"})
+
+        self.assertEqual(response.status_code, 504)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "provider_timeout")
+
+
+class ManagementCommandTests(TestCase):
+    @override_settings(TELEGRAM_BOT_TOKEN="")
+    def test_run_telegram_bot_requires_token(self):
+        stderr = StringIO()
+        call_command("run_telegram_bot", stderr=stderr)
+
+        self.assertIn("Set TELEGRAM_BOT_TOKEN in .env", stderr.getvalue())

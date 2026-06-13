@@ -1,105 +1,253 @@
-# 🎵 Sound2Mean
+# Sound2Mean
 
-**Понимай музыку. Учи язык. Живи смыслами.**
+Учебный Django-проект для поиска песен, чтения текста с переводом и сохранения слов в персональные карточки.
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
-[![Django](https://img.shields.io/badge/Django-4.2-green.svg)](https://djangoproject.com)
-[![Telegram](https://img.shields.io/badge/Telegram-Bot-blue.svg)](https://core.telegram.org/bots/api)
+Приложение объединяет несколько сценариев:
 
-Весь смысл любимых зарубежных песен — в одном клике. Больше не нужно переключаться между плеером и переводчиком.
+- поиск песни по названию, исполнителю или фрагменту текста;
+- просмотр текста песни;
+- построчный перевод текста;
+- сохранение слов и фраз в персональные карточки;
+- вход через Telegram;
+- Telegram-бот для авторизации и учебных сценариев.
 
-## 👥 Для кого этот проект?
+## Что умеет проект
 
-- 🎧 **Меломаны**, которые хотят понимать смысл песен
-- 📚 **Изучающие языки** через музыку
-- 💡 **Люди, ценящие время** и удобство
-- 🚀 **Стартаперы**, интересующиеся EdTech
+### Поиск песен
 
-## ✨ Возможности
+Поиск работает через LRCLib. Пользователь может искать:
 
-- 🔍 **Поиск песен** по названию или тексту
-- 📖 **Текст + перевод** параллельным просмотром  
-- 🧠 **Умный анализ** устойчивых выражений через LLM
-- 📝 **Транскрипция** сложных слов
-- 💾 **Сохранение** слов и фраз в личный словарь
-- 🔄 **Повторение** через Telegram-бота
-- 🎯 **Персонализация** процесса обучения
+- по названию трека;
+- по схеме `artist - title`;
+- по части строки из песни;
+- по свободному описанию, если включён AI query planner.
 
-## 🌟 Что делает нас уникальными?
+Поиск ранжирует кандидатов, кэширует результаты и старается вернуть лучший ответ в пределах заданного latency budget.
 
-| Мы | Другие сервисы |
-|---|----------------|
-| Поиск + перевод + обучение в одном месте | Разрозненные инструменты |
-| AI-анализ устойчивых выражений | Простой машинный перевод |
-| Персонализация через Telegram | Без персонализации |
-| Фокус на микро-обучении | Объемные курсы |
+### Просмотр текста и перевода
 
-## 🛠 Технологии, которые мы используем
+Для найденной песни можно открыть страницу с текстом. Если настроен переводчик, приложение показывает английские строки и русский перевод рядом.
 
-**Backend:** Python, Django, PostgreSQL  
-**Frontend:** React, TypeScript, Tailwind CSS  
-**AI:** OpenAI GPT, машинный перевод  
-**Mobile:** Telegram Bot API  
-**Infrastructure:** Docker, Nginx
+Поддерживаются два режима:
 
-## AI Search Planning
+- `mock` — безопасный локальный режим без внешнего API;
+- `openai` — перевод через OpenAI API.
 
-The main song source remains LRCLIB.
+### Карточки слов
 
-If `AI_SEARCH_ENABLED=1`, the regular HTML search can use OpenAI only as a query planner for weak or natural-language queries. OpenAI does not replace LRCLIB and does not return songs directly. It only builds several improved search queries, and those queries are then sent to LRCLIB.
+На странице песни можно сохранять слова и фразы в персональные карточки. Для карточки сохраняются:
 
-Environment variables:
+- слово или фраза;
+- перевод;
+- контекст;
+- песня и исполнитель.
 
-- `AI_SEARCH_ENABLED=0`
-- `OPENAI_API_KEY=`
-- `OPENAI_SEARCH_MODEL=gpt-4o-mini`
-- `AI_SEARCH_TIMEOUT=10`
+Карточки можно листать, переключать режим колоды и включать shuffle.
 
-## 📅 Ближайшие планы
+### Telegram-авторизация
 
-**Октябрь 2025 - Январь 2026:** Базовый функционал  
-**Январь - Март 2026:** AI-фичи и Telegram бот  
-**Март - Апрель 2026:** Бета-тестирование
+Пользователь может зайти через Telegram:
 
----
+1. открыть бота;
+2. отправить `/start`;
+3. указать username на сайте;
+4. получить одноразовый код;
+5. войти на сайт.
 
-*"Музыка — это язык, который понимают все. Мы просто помогаем понять слова."*
-## Translation Setup
+## Стек
 
-The project reads translation settings from the root `.env` file on startup.
+- Python 3.12+
+- Django 6
+- SQLite для локальной разработки
+- LRCLib как провайдер текстов песен
+- OpenAI API для перевода и AI-планирования поисковых запросов
+- Docker / Docker Compose
+- Poetry для управления зависимостями
 
-Supported providers:
+## Структура проекта
 
-- `TRANSLATION_PROVIDER=mock` for a visible local fallback without external API calls
-- `TRANSLATION_PROVIDER=openai` for real translation through the OpenAI Responses API
+- `core/` — основное Django-приложение
+- `core/services/` — бизнес-логика, интеграции и сервисы
+- `core/templates/` — HTML-шаблоны
+- `core/static/` — CSS и статические файлы
+- `sound2mean_project/` — настройки Django-проекта
+- `docker-compose.yml` — локальный запуск через Docker
+- `pyproject.toml` — зависимости и конфигурация проекта
 
-Example `.env` for OpenAI:
+## Локальный запуск через Poetry
 
-```env
-TRANSLATION_PROVIDER=openai
-TRANSLATION_TARGET_LANGUAGE=ru
-TRANSLATION_TIMEOUT=20
-TRANSLATION_MODEL=gpt-4o-mini
-TRANSLATION_API_KEY=your_openai_api_key
+### 1. Установить зависимости
+
+```bash
+poetry lock
+poetry install --with dev
 ```
 
-Example `.env` for a safe local stub:
+### 2. Создать `.env`
+
+Можно взять за основу `.env.example`.
+
+Минимальный локальный вариант:
 
 ```env
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_BOT_USERNAME=
+TELEGRAM_PROXY=
+
 TRANSLATION_PROVIDER=mock
 TRANSLATION_TARGET_LANGUAGE=ru
 TRANSLATION_TIMEOUT=20
 TRANSLATION_MODEL=gpt-4o-mini
 TRANSLATION_API_KEY=
+
+AI_SEARCH_ENABLED=0
+OPENAI_API_KEY=
+OPENAI_SEARCH_MODEL=gpt-4o-mini
+AI_SEARCH_TIMEOUT=4
+
+LYRICS_SEARCH_BUDGET_SECONDS=8
+LRCLIB_SEARCH_CONNECT_TIMEOUT=2
+LRCLIB_SEARCH_READ_TIMEOUT=5
+LRCLIB_GET_READ_TIMEOUT=8
+LYRICS_SEARCH_MAX_ATTEMPTS=4
+LYRICS_SEARCH_ENABLE_DEEP_FALLBACK=0
 ```
 
-If `TRANSLATION_PROVIDER` is empty, the page still works:
-English lyrics are shown, and the UI displays a soft message that translation is not configured.
+### 3. Применить миграции
 
-Variables used by the translation feature:
+```bash
+poetry run python manage.py migrate
+```
 
-- `TRANSLATION_PROVIDER`
-- `TRANSLATION_TARGET_LANGUAGE`
-- `TRANSLATION_TIMEOUT`
-- `TRANSLATION_MODEL`
-- `TRANSLATION_API_KEY`
+### 4. Запустить сервер
+
+```bash
+poetry run python manage.py runserver
+```
+
+После запуска приложение будет доступно на:
+
+```text
+http://127.0.0.1:8000
+```
+
+### 5. При необходимости запустить Telegram-бота
+
+```bash
+poetry run python manage.py run_telegram_bot
+```
+
+## Локальный запуск через Docker
+
+В проекте есть `docker-compose.yml` с сервисами:
+
+- `web` — Django-приложение;
+- `bot` — Telegram-бот;
+
+### Запуск
+
+```bash
+docker compose up --build
+```
+
+Или в фоне:
+
+```bash
+docker compose up --build -d
+```
+
+После запуска:
+
+- сайт будет доступен на `http://127.0.0.1:8000`;
+- миграции применятся автоматически;
+- бот запустится отдельным сервисом.
+
+### Остановка
+
+```bash
+docker compose down
+```
+
+### Логи
+
+```bash
+docker compose logs -f
+```
+
+## Тесты
+
+Запуск через Poetry:
+
+```bash
+poetry run pytest core -v
+```
+
+Или через Django test runner:
+
+```bash
+poetry run python manage.py test
+```
+
+## Настройки окружения
+
+### Поиск текстов
+
+- `LYRICS_SEARCH_BUDGET_SECONDS` — общий budget на поиск
+- `LRCLIB_SEARCH_CONNECT_TIMEOUT` — connect timeout для `/search`
+- `LRCLIB_SEARCH_READ_TIMEOUT` — read timeout для `/search`
+- `LRCLIB_GET_READ_TIMEOUT` — read timeout для `/get`
+- `LYRICS_SEARCH_MAX_ATTEMPTS` — максимальное число non-AI search attempts
+- `LYRICS_SEARCH_ENABLE_DEEP_FALLBACK` — включает более глубокий fallback
+
+### AI-поиск
+
+- `AI_SEARCH_ENABLED` — включает AI planner
+- `OPENAI_API_KEY` — ключ OpenAI
+- `OPENAI_SEARCH_MODEL` — модель для AI planner
+- `AI_SEARCH_TIMEOUT` — timeout AI planner
+
+### Перевод
+
+- `TRANSLATION_PROVIDER` — `mock` или `openai`
+- `TRANSLATION_TARGET_LANGUAGE` — целевой язык
+- `TRANSLATION_TIMEOUT` — timeout перевода
+- `TRANSLATION_MODEL` — модель перевода
+- `TRANSLATION_API_KEY` — ключ для перевода
+
+### Telegram
+
+- `TELEGRAM_BOT_TOKEN` — токен бота
+- `TELEGRAM_BOT_USERNAME` — username бота
+- `TELEGRAM_PROXY` — proxy для Telegram/OpenAI запросов при необходимости
+
+## Полезные команды
+
+Установить зависимости:
+
+```bash
+poetry install --with dev
+```
+
+Применить миграции:
+
+```bash
+poetry run python manage.py migrate
+```
+
+Запустить сервер:
+
+```bash
+poetry run python manage.py runserver
+```
+
+Запустить тесты:
+
+```bash
+poetry run pytest core -v
+```
+
+Поднять Docker-окружение:
+
+```bash
+docker compose up --build
+```
