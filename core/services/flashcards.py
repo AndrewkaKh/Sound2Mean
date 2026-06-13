@@ -6,20 +6,45 @@ from ..models import VocabularyWord
 
 DECK_ALL = "all"
 DECK_FAVORITES = "favorites"
+PLAYLIST_DECK_PREFIX = "playlist:"
 VALID_DECKS = {DECK_ALL, DECK_FAVORITES}
+
+
+def is_playlist_deck(deck_mode: str) -> bool:
+    return deck_mode.startswith(PLAYLIST_DECK_PREFIX)
+
+
+def parse_playlist_id(deck_mode: str) -> int | None:
+    if not is_playlist_deck(deck_mode):
+        return None
+    try:
+        return int(deck_mode.split(":", 1)[1])
+    except (IndexError, ValueError):
+        return None
+
+
+def playlist_deck_mode(playlist_id: int) -> str:
+    return f"{PLAYLIST_DECK_PREFIX}{playlist_id}"
 
 
 def get_deck_mode(request) -> str:
     mode = request.session.get("flashcard_mode", DECK_ALL)
-    return mode if mode in VALID_DECKS else DECK_ALL
+    if mode in VALID_DECKS or is_playlist_deck(mode):
+        return mode
+    return DECK_ALL
 
 
 def set_deck_mode(request, mode: str) -> None:
-    if mode not in VALID_DECKS:
+    if mode not in VALID_DECKS and not is_playlist_deck(mode):
         mode = DECK_ALL
-    if get_deck_mode(request) != mode:
+    current = request.session.get("flashcard_mode", DECK_ALL)
+    if current != mode:
         request.session["flashcard_mode"] = mode
         reset_queue(request)
+
+
+def set_playlist_deck(request, playlist_id: int) -> None:
+    set_deck_mode(request, playlist_deck_mode(playlist_id))
 
 
 def is_shuffle_enabled(request) -> bool:
@@ -51,6 +76,17 @@ def get_user_word_ids(user, *, favorites_only: bool = False) -> list[int]:
 
 
 def get_deck_word_ids(user, deck_mode: str) -> list[int]:
+    playlist_id = parse_playlist_id(deck_mode)
+    if playlist_id is not None:
+        return list(
+            VocabularyWord.objects.filter(
+                user=user,
+                playlist_items__playlist_id=playlist_id,
+                playlist_items__playlist__user=user,
+            )
+            .order_by("word_en", "id")
+            .values_list("id", flat=True)
+        )
     return get_user_word_ids(user, favorites_only=(deck_mode == DECK_FAVORITES))
 
 

@@ -12,6 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .models import TelegramUser, VocabularyWord
 from .services.lyrics_service import consume_last_provider_error, get_song, resolve_lyrics, search_candidates
 from .services.providers.lrclib import LRCLibError
+from .services.playlists import build_playlists_payload, toggle_word_in_playlist
 from .services.translation_service import TranslationServiceError, translate_lines_to_russian
 
 logger = logging.getLogger(__name__)
@@ -306,3 +307,39 @@ def cards_create(request):
     request.session["flashcard_current_id"] = card.id
     request.session.modified = True
     return JsonResponse({"ok": True, "card": _serialize_card(card)})
+
+
+@require_GET
+def playlists_list(request):
+    user = _get_current_telegram_user(request)
+    if not user:
+        return _unauthorized()
+
+    word_id_raw = (request.GET.get("word_id") or "").strip()
+    word_id = int(word_id_raw) if word_id_raw.isdigit() else None
+    if word_id is not None and not VocabularyWord.objects.filter(pk=word_id, user=user).exists():
+        return _bad_request("Word not found")
+
+    return JsonResponse({"ok": True, "playlists": build_playlists_payload(user, word_id=word_id)})
+
+
+@require_POST
+def playlist_toggle_word(request):
+    user = _get_current_telegram_user(request)
+    if not user:
+        return _unauthorized()
+
+    payload = _parse_json_body(request)
+    if payload is None:
+        return _bad_request("Invalid JSON body", code="invalid_json")
+
+    playlist_id_raw = payload.get("playlist_id")
+    word_id_raw = payload.get("word_id")
+    if not isinstance(playlist_id_raw, int) or not isinstance(word_id_raw, int):
+        return _bad_request("playlist_id and word_id must be integers")
+
+    contains = toggle_word_in_playlist(user, playlist_id_raw, word_id_raw)
+    if contains is None:
+        return _bad_request("Playlist or word not found")
+
+    return JsonResponse({"ok": True, "contains": contains, "playlists": build_playlists_payload(user, word_id=word_id_raw)})

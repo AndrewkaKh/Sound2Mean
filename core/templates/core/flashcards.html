@@ -15,141 +15,423 @@
         </div>
     {% else %}
         <h1>Карточки слов</h1>
-        <p class="flashcards-meta">
-            В словаре: {{ words_count }}
-            · Избранное: {{ favorites_count }}
-        </p>
 
-        <div class="flashcards-deck-switch">
-            <form method="post" class="flashcards-deck-form">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="set_deck">
-                <button type="submit" name="deck" value="{{ deck_all }}"
-                        class="flashcards-deck-btn {% if deck_mode == deck_all %}is-active{% endif %}">
-                    Все слова
-                </button>
-                <button type="submit" name="deck" value="{{ deck_favorites }}"
-                        class="flashcards-deck-btn {% if deck_mode == deck_favorites %}is-active{% endif %}">
-                    Избранное
-                </button>
-            </form>
-        </div>
-
-        {% if card %}
-            <div class="flashcard-stack">
-                <div class="flashcard" id="flashcard">
-                    <div class="flashcard__body">
-                        <div class="flashcard__en">{{ card.word_en }}</div>
-                        <div class="flashcard__ru is-hidden" id="flashcard-ru">{{ card.word_ru }}</div>
-                        {% if card.context %}
-                            <div class="flashcard__context">“{{ card.context }}”</div>
-                        {% endif %}
-                        {% if card.song_title or card.song_artist %}
-                            <div class="flashcard__song">
-                                {{ card.song_title }}{% if card.song_artist %} · {{ card.song_artist }}{% endif %}
-                            </div>
-                        {% endif %}
-                    </div>
-
-                    <div class="flashcard__corners">
-                        <form method="post" class="flashcard-corner-form"
-                              onsubmit="return confirm('Удалить слово «{{ card.word_en }}»?');">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="card_id" value="{{ card.id }}">
-                            <button type="submit" class="flashcard-icon-btn flashcard-icon-btn--delete" aria-label="Удалить слово">
-                                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-                                    <path d="M4 4L14 14M14 4L4 14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-                                </svg>
-                            </button>
-                        </form>
-
-                        <form method="post" class="flashcard-corner-form">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="toggle_favorite">
-                            <input type="hidden" name="card_id" value="{{ card.id }}">
-                            <button type="submit"
-                                    class="flashcard-icon-btn flashcard-icon-btn--favorite {% if card.is_favorite %}is-active{% endif %}"
-                                    aria-label="{% if card.is_favorite %}Убрать из избранного{% else %}Добавить в избранное{% endif %}">
-                                {% if card.is_favorite %}
-                                    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path fill="#FFC107" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
-                                    </svg>
-                                {% else %}
-                                    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path fill="none" stroke="#FFC107" stroke-width="1.8" stroke-linejoin="round"
-                                              d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
-                                    </svg>
-                                {% endif %}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-
-                <div class="flashcard-toolbar">
-                    <button type="button" class="btn btn--reveal" id="show-translation">
-                        Показать перевод
-                    </button>
-                    <form method="post" class="flashcard-next-form">
+        <div class="flashcards-layout">
+            <aside class="flashcards-sidebar">
+                <div class="flashcards-sidebar__decks">
+                    <form method="post" class="flashcards-sidebar__deck-form">
                         {% csrf_token %}
-                        <input type="hidden" name="action" value="next">
-                        <button type="submit" class="btn btn--next"{% if not can_next %} disabled{% endif %}>Следующая карточка</button>
-                    </form>
-                    <form method="post" class="flashcard-shuffle-form">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="toggle_shuffle">
-                        <button type="submit"
-                                class="flashcard-shuffle-btn {% if shuffle_enabled %}is-active{% endif %}"
-                                aria-label="{% if shuffle_enabled %}Перемешивание включено{% else %}Перемешивание выключено{% endif %}"
-                                aria-pressed="{% if shuffle_enabled %}true{% else %}false{% endif %}">
-                            {% if shuffle_enabled %}
-                                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path fill="currentColor" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
-                                </svg>
-                            {% else %}
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>
-                                </svg>
-                            {% endif %}
+                        <input type="hidden" name="action" value="set_deck">
+                        <button type="submit" name="deck" value="{{ deck_all }}"
+                                class="flashcards-sidebar__deck {% if deck_mode == deck_all %}is-active{% endif %}">
+                            Все слова
+                            <span class="flashcards-sidebar__count">{{ words_count }}</span>
+                        </button>
+                        <button type="submit" name="deck" value="{{ deck_favorites }}"
+                                class="flashcards-sidebar__deck {% if deck_mode == deck_favorites %}is-active{% endif %}">
+                            Избранное
+                            <span class="flashcards-sidebar__count">{{ favorites_count }}</span>
                         </button>
                     </form>
                 </div>
-            </div>
-        {% else %}
-            <div class="flashcards-empty">
-                {% if deck_mode == deck_favorites %}
-                    <p>В избранном пока нет слов.</p>
-                {% else %}
-                    <p>Слов пока нет. Добавьте первое слово ниже.</p>
-                {% endif %}
-            </div>
-        {% endif %}
 
-        <details class="flashcards-add">
-            <summary>Добавить слово</summary>
-            <form method="post" class="flashcards-add-form">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="add_word">
-                <label for="id_word_en">English</label>
-                <input id="id_word_en" type="text" name="word_en" placeholder="hello" required>
-                <label for="id_word_ru">Перевод</label>
-                <input id="id_word_ru" type="text" name="word_ru" placeholder="привет" required>
-                <button type="submit" class="btn flashcards-add-submit">Добавить</button>
-            </form>
-        </details>
+                <div class="flashcards-sidebar__divider" aria-hidden="true"></div>
+
+                <div class="flashcards-sidebar__playlists" id="playlists-sidebar">
+                    {% if playlists %}
+                        <div class="flashcards-sidebar__playlist-list">
+                            {% for playlist in playlists %}
+                                <div class="flashcards-sidebar__playlist-item">
+                                    <form method="post" class="flashcards-sidebar__playlist-select">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="set_playlist_deck">
+                                        <button type="submit"
+                                                name="playlist_id"
+                                                value="{{ playlist.id }}"
+                                                class="flashcards-sidebar__deck flashcards-sidebar__deck--playlist {% if active_playlist_id == playlist.id %}is-active{% endif %}">
+                                            <span class="flashcards-sidebar__deck-label">{{ playlist.name }}</span>
+                                            <span class="flashcards-sidebar__count">{{ playlist.word_count }}</span>
+                                        </button>
+                                    </form>
+                                    <div class="flashcards-sidebar__playlist-actions">
+                                        <button type="button"
+                                                class="flashcards-sidebar__playlist-copy-btn"
+                                                data-code="{{ playlist.share_code }}"
+                                                title="Скопировать код {{ playlist.share_code }}"
+                                                aria-label="Скопировать код плейлиста {{ playlist.share_code }}">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                                            </svg>
+                                        </button>
+                                        <form method="post"
+                                              class="flashcards-sidebar__playlist-delete"
+                                              onsubmit="return confirm('Удалить плейлист «{{ playlist.name|escapejs }}»? Слова останутся в словаре.');">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="action" value="delete_playlist">
+                                            <input type="hidden" name="playlist_id" value="{{ playlist.id }}">
+                                            <button type="submit"
+                                                    class="flashcards-sidebar__playlist-delete-btn"
+                                                    aria-label="Удалить плейлист «{{ playlist.name }}»">×</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="flashcards-sidebar__empty">Плейлистов пока нет</p>
+                    {% endif %}
+                </div>
+
+                <form method="post" class="flashcards-playlist-import">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="import_playlist">
+                    <label class="flashcards-playlist-import__label" for="id_playlist_code">Добавить по коду</label>
+                    <div class="flashcards-playlist-import__row">
+                        <input id="id_playlist_code"
+                               type="text"
+                               name="playlist_code"
+                               placeholder="AB12CD34"
+                               maxlength="12"
+                               autocapitalize="characters"
+                               spellcheck="false"
+                               required>
+                        <button type="submit" class="btn flashcards-playlist-import__btn">+</button>
+                    </div>
+                </form>
+
+                <form method="post" class="flashcards-playlist-create">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create_playlist">
+                    <label class="flashcards-playlist-create__label" for="id_playlist_name">Новый плейлист</label>
+                    <div class="flashcards-playlist-create__row">
+                        <input id="id_playlist_name" type="text" name="playlist_name" placeholder="Название" required maxlength="100">
+                        <button type="submit" class="btn flashcards-playlist-create__btn">+</button>
+                    </div>
+                </form>
+            </aside>
+
+            <div class="flashcards-main">
+                {% if card %}
+                    <div class="flashcard-stack">
+                        <div class="flashcard" id="flashcard">
+                            <div class="flashcard__playlist-picker">
+                                <button type="button"
+                                        class="flashcard-playlist-add"
+                                        id="playlist-menu-btn"
+                                        aria-label="Добавить в плейлист"
+                                        aria-expanded="false"
+                                        aria-controls="playlist-menu">+</button>
+                                <div class="flashcard-playlist-menu is-hidden" id="playlist-menu" role="menu">
+                                    {% for playlist in playlists %}
+                                        <button type="button"
+                                                class="flashcard-playlist-menu__item {% if playlist.contains_word %}is-in-playlist{% endif %}"
+                                                role="menuitem"
+                                                data-playlist-id="{{ playlist.id }}"
+                                                data-word-id="{{ card.id }}">
+                                            <span class="flashcard-playlist-menu__name">{{ playlist.name }}</span>
+                                            <span class="flashcard-playlist-menu__status" aria-hidden="true">
+                                                {% if playlist.contains_word %}✓{% else %}+{% endif %}
+                                            </span>
+                                        </button>
+                                    {% empty %}
+                                        <div class="flashcard-playlist-menu__empty">Сначала создайте плейлист слева</div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+
+                            <div class="flashcard__body">
+                                <div class="flashcard__en">{{ card.word_en }}</div>
+                                <div class="flashcard__ru is-hidden" id="flashcard-ru">{{ card.word_ru }}</div>
+                                {% if card.context %}
+                                    <div class="flashcard__context">“{{ card.context }}”</div>
+                                {% endif %}
+                                {% if card.song_title or card.song_artist %}
+                                    <div class="flashcard__song">
+                                        {{ card.song_title }}{% if card.song_artist %} · {{ card.song_artist }}{% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="flashcard__corners">
+                                <form method="post" class="flashcard-corner-form"
+                                      onsubmit="return confirm('Удалить слово «{{ card.word_en }}» из словаря?');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="card_id" value="{{ card.id }}">
+                                    <button type="submit" class="flashcard-icon-btn flashcard-icon-btn--delete" aria-label="Удалить слово">
+                                        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+                                            <path d="M4 4L14 14M14 4L4 14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                                        </svg>
+                                    </button>
+                                </form>
+
+                                <form method="post" class="flashcard-corner-form">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="toggle_favorite">
+                                    <input type="hidden" name="card_id" value="{{ card.id }}">
+                                    <button type="submit"
+                                            class="flashcard-icon-btn flashcard-icon-btn--favorite {% if card.is_favorite %}is-active{% endif %}"
+                                            aria-label="{% if card.is_favorite %}Убрать из избранного{% else %}Добавить в избранное{% endif %}">
+                                        {% if card.is_favorite %}
+                                            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path fill="#FFC107" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                                            </svg>
+                                        {% else %}
+                                            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path fill="none" stroke="#FFC107" stroke-width="1.8" stroke-linejoin="round"
+                                                      d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                                            </svg>
+                                        {% endif %}
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="flashcard-toolbar">
+                            <button type="button" class="btn btn--reveal" id="show-translation">
+                                Показать перевод
+                            </button>
+                            <form method="post" class="flashcard-next-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="next">
+                                <button type="submit" class="btn btn--next"{% if not can_next %} disabled{% endif %}>Следующая карточка</button>
+                            </form>
+                            <form method="post" class="flashcard-shuffle-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="toggle_shuffle">
+                                <button type="submit"
+                                        class="flashcard-shuffle-btn {% if shuffle_enabled %}is-active{% endif %}"
+                                        aria-label="{% if shuffle_enabled %}Перемешивание включено{% else %}Перемешивание выключено{% endif %}"
+                                        aria-pressed="{% if shuffle_enabled %}true{% else %}false{% endif %}">
+                                    {% if shuffle_enabled %}
+                                        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path fill="currentColor" d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
+                                        </svg>
+                                    {% else %}
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                            <path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>
+                                        </svg>
+                                    {% endif %}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                {% else %}
+                    <div class="flashcards-empty">
+                        {% if is_playlist_deck %}
+                            <p>В этом плейлисте пока нет слов.</p>
+                        {% elif deck_mode == deck_favorites %}
+                            <p>В избранном пока нет слов.</p>
+                        {% else %}
+                            <p>Слов пока нет. Добавьте первое слово ниже.</p>
+                        {% endif %}
+                    </div>
+                {% endif %}
+
+                <details class="flashcards-add">
+                    <summary>Добавить слово</summary>
+                    <form method="post" class="flashcards-add-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="add_word">
+                        <label for="id_word_en">English</label>
+                        <input id="id_word_en" type="text" name="word_en" placeholder="hello" required>
+                        <label for="id_word_ru">Перевод</label>
+                        <input id="id_word_ru" type="text" name="word_ru" placeholder="привет" required>
+                        <button type="submit" class="btn flashcards-add-submit">Добавить</button>
+                    </form>
+                </details>
+            </div>
+        </div>
     {% endif %}
 </section>
+
+{% if authorized %}
+<script>
+(function () {
+    var sidebar = document.getElementById('playlists-sidebar');
+
+    function copyPlaylistCode(button) {
+        var code = button.dataset.code;
+        if (!code) return;
+
+        function markCopied() {
+            button.classList.add('is-copied');
+            window.setTimeout(function () {
+                button.classList.remove('is-copied');
+            }, 1500);
+        }
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(markCopied).catch(function () {});
+            return;
+        }
+
+        var input = document.createElement('textarea');
+        input.value = code;
+        input.setAttribute('readonly', '');
+        input.style.position = 'absolute';
+        input.style.left = '-9999px';
+        document.body.appendChild(input);
+        input.select();
+        try {
+            if (document.execCommand('copy')) {
+                markCopied();
+            }
+        } catch (e) {}
+        document.body.removeChild(input);
+    }
+
+    if (sidebar) {
+        sidebar.addEventListener('click', function (event) {
+            var copyBtn = event.target.closest('.flashcards-sidebar__playlist-copy-btn');
+            if (!copyBtn) return;
+            event.preventDefault();
+            copyPlaylistCode(copyBtn);
+        });
+    }
+})();
+</script>
+{% endif %}
 
 {% if authorized and card %}
 <script>
 (function () {
     var btn = document.getElementById('show-translation');
     var ru = document.getElementById('flashcard-ru');
-    if (!btn || !ru) return;
-    btn.addEventListener('click', function () {
-        ru.classList.remove('is-hidden');
-        btn.classList.add('is-used');
-        btn.textContent = 'Перевод';
+    if (btn && ru) {
+        btn.addEventListener('click', function () {
+            ru.classList.remove('is-hidden');
+            btn.classList.add('is-used');
+            btn.textContent = 'Перевод';
+        });
+    }
+
+    function getCookie(name) {
+        var cookieValue = null;
+        if (!document.cookie) return cookieValue;
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i += 1) {
+            var cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+        return cookieValue;
+    }
+
+    var menuBtn = document.getElementById('playlist-menu-btn');
+    var menu = document.getElementById('playlist-menu');
+    var sidebar = document.getElementById('playlists-sidebar');
+    var wordId = {{ card.id }};
+    var activePlaylistId = {% if active_playlist_id %}{{ active_playlist_id }}{% else %}null{% endif %};
+
+    function closeMenu() {
+        if (!menu || !menuBtn) return;
+        menu.classList.add('is-hidden');
+        menuBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    if (menuBtn && menu) {
+        menuBtn.addEventListener('click', function (event) {
+            event.stopPropagation();
+            var willOpen = menu.classList.contains('is-hidden');
+            if (willOpen) {
+                menu.classList.remove('is-hidden');
+                menuBtn.setAttribute('aria-expanded', 'true');
+            } else {
+                closeMenu();
+            }
+        });
+
+        document.addEventListener('click', function (event) {
+            if (!menu.contains(event.target) && event.target !== menuBtn) {
+                closeMenu();
+            }
+        });
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function renderSidebar(playlists) {
+        if (!sidebar) return;
+        if (!playlists.length) {
+            sidebar.innerHTML = '<p class="flashcards-sidebar__empty">Плейлистов пока нет</p>';
+            return;
+        }
+
+        var csrf = getCookie('csrftoken');
+        var items = playlists.map(function (playlist) {
+            var activeClass = activePlaylistId === playlist.id ? ' is-active' : '';
+            var name = escapeHtml(playlist.name);
+            var confirmMsg = JSON.stringify(
+                'Удалить плейлист «' + playlist.name + '»? Слова останутся в словаре.'
+            );
+            return '<div class="flashcards-sidebar__playlist-item">' +
+                '<form method="post" class="flashcards-sidebar__playlist-select">' +
+                '<input type="hidden" name="csrfmiddlewaretoken" value="' + csrf + '">' +
+                '<input type="hidden" name="action" value="set_playlist_deck">' +
+                '<button type="submit" name="playlist_id" value="' + playlist.id + '"' +
+                ' class="flashcards-sidebar__deck flashcards-sidebar__deck--playlist' + activeClass + '">' +
+                '<span class="flashcards-sidebar__deck-label">' + name + '</span>' +
+                '<span class="flashcards-sidebar__count">' + playlist.word_count + '</span>' +
+                '</button></form>' +
+                '<div class="flashcards-sidebar__playlist-actions">' +
+                '<button type="button" class="flashcards-sidebar__playlist-copy-btn"' +
+                ' data-code="' + escapeHtml(playlist.share_code) + '"' +
+                ' title="Скопировать код ' + escapeHtml(playlist.share_code) + '"' +
+                ' aria-label="Скопировать код плейлиста">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">' +
+                '<path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>' +
+                '</svg></button>' +
+                '<form method="post" class="flashcards-sidebar__playlist-delete"' +
+                ' onsubmit="return confirm(' + confirmMsg + ');">' +
+                '<input type="hidden" name="csrfmiddlewaretoken" value="' + csrf + '">' +
+                '<input type="hidden" name="action" value="delete_playlist">' +
+                '<input type="hidden" name="playlist_id" value="' + playlist.id + '">' +
+                '<button type="submit" class="flashcards-sidebar__playlist-delete-btn"' +
+                ' aria-label="Удалить плейлист">×</button></form></div></div>';
+        }).join('');
+
+        sidebar.innerHTML = '<div class="flashcards-sidebar__playlist-list">' + items + '</div>';
+    }
+
+    function updateMenuItem(button, contains) {
+        button.classList.toggle('is-in-playlist', contains);
+        var status = button.querySelector('.flashcard-playlist-menu__status');
+        if (status) {
+            status.textContent = contains ? '✓' : '+';
+        }
+    }
+
+    document.querySelectorAll('.flashcard-playlist-menu__item').forEach(function (item) {
+        item.addEventListener('click', function () {
+            var playlistId = parseInt(item.dataset.playlistId, 10);
+            fetch('{% url "api_playlist_toggle_word" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    playlist_id: playlistId,
+                    word_id: wordId
+                })
+            })
+                .then(function (response) { return response.json(); })
+                .then(function (payload) {
+                    if (!payload || !payload.ok) return;
+                    updateMenuItem(item, payload.contains);
+                    if (payload.playlists) {
+                        renderSidebar(payload.playlists);
+                    }
+                })
+                .catch(function () {});
+        });
     });
 })();
 </script>

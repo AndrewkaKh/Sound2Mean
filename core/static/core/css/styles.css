@@ -543,11 +543,274 @@ a {
 
 .flashcards-page {
     margin-top: 10px;
+    --flashcards-sidebar-height: min(480px, calc(100dvh - 280px));
 }
 
 .flashcards-page h1 {
-    margin: 18px 0 8px;
-    font-size: 32px;
+    margin: 12px 0 12px;
+    font-size: 28px;
+}
+
+.flashcards-layout {
+    display: grid;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+}
+
+.flashcards-sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: var(--flashcards-sidebar-height);
+    max-height: var(--flashcards-sidebar-height);
+    min-height: 0;
+    min-width: 0;
+    padding: 12px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.flashcards-sidebar__decks {
+    flex-shrink: 0;
+}
+
+.flashcards-sidebar__deck-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+}
+
+.flashcards-sidebar__deck {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    padding: 10px 11px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 650;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.flashcards-sidebar__deck--playlist {
+    align-items: flex-start;
+    height: 100%;
+}
+
+.flashcards-sidebar__deck-label {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35;
+}
+
+.flashcards-sidebar__deck--playlist .flashcards-sidebar__count {
+    flex-shrink: 0;
+    padding-top: 2px;
+}
+
+.flashcards-sidebar__deck:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.flashcards-sidebar__deck.is-active {
+    background: rgba(233, 30, 99, 0.18);
+    border-color: rgba(233, 30, 99, 0.45);
+}
+
+.flashcards-sidebar__count {
+    font-size: 12px;
+    opacity: 0.72;
+}
+
+.flashcards-sidebar__divider {
+    height: 1px;
+    margin: 10px 0;
+    background: rgba(255, 255, 255, 0.10);
+    flex-shrink: 0;
+}
+
+.flashcards-sidebar__playlists {
+    flex: 1;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-right: 4px;
+    padding-bottom: 12px;
+    scroll-padding-bottom: 12px;
+}
+
+.flashcards-sidebar__playlist-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-bottom: 4px;
+}
+
+.flashcards-sidebar__playlist-item {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    min-width: 0;
+}
+
+.flashcards-sidebar__playlist-select {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+}
+
+.flashcards-sidebar__playlist-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    flex-shrink: 0;
+    align-items: stretch;
+}
+
+.flashcards-sidebar__playlist-copy-btn,
+.flashcards-sidebar__playlist-delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 100%;
+    min-height: 40px;
+    padding: 0;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.72);
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.flashcards-sidebar__playlist-copy-btn {
+    font-size: 0;
+}
+
+.flashcards-sidebar__playlist-copy-btn:hover {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.10);
+}
+
+.flashcards-sidebar__playlist-copy-btn.is-copied {
+    color: #8ee99a;
+    border-color: rgba(142, 233, 154, 0.45);
+    background: rgba(142, 233, 154, 0.12);
+}
+
+.flashcards-sidebar__playlist-delete {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.flashcards-sidebar__playlist-delete-btn {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 20px;
+}
+
+.flashcards-sidebar__playlist-delete-btn:hover {
+    color: #ff8a8a;
+    border-color: rgba(255, 138, 138, 0.45);
+    background: rgba(255, 80, 80, 0.12);
+}
+
+.flashcards-sidebar__empty {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.flashcards-playlist-import {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+    flex-shrink: 0;
+}
+
+.flashcards-playlist-import__label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    opacity: 0.85;
+}
+
+.flashcards-playlist-import__row {
+    display: flex;
+    gap: 8px;
+}
+
+.flashcards-playlist-import__row input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: var(--surface-input);
+    color: #fff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.flashcards-playlist-import__btn {
+    min-width: 44px;
+    padding-inline: 14px;
+}
+
+.flashcards-playlist-create {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+    flex-shrink: 0;
+}
+
+.flashcards-playlist-create__label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    opacity: 0.85;
+}
+
+.flashcards-playlist-create__row {
+    display: flex;
+    gap: 8px;
+}
+
+.flashcards-playlist-create__row input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: var(--surface-input);
+    color: #fff;
+}
+
+.flashcards-playlist-create__btn {
+    min-width: 44px;
+    padding-inline: 14px;
+}
+
+.flashcards-main {
+    min-width: 0;
 }
 
 .flashcards-meta {
@@ -610,7 +873,7 @@ a {
 
 .flashcard-stack {
     max-width: 520px;
-    margin: 0 auto 32px;
+    margin: 0 0 32px;
 }
 
 .flashcard {
@@ -623,6 +886,101 @@ a {
     background: var(--card-bg);
     border: 1px solid var(--card-border);
     backdrop-filter: blur(10px);
+    position: relative;
+}
+
+.flashcard__playlist-picker {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 2;
+}
+
+.flashcard-playlist-add {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.flashcard-playlist-add:hover {
+    background: rgba(233, 30, 99, 0.18);
+    border-color: rgba(233, 30, 99, 0.45);
+}
+
+.flashcard-playlist-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 220px;
+    max-width: 280px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 6px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: var(--surface-modal);
+    box-shadow: var(--shadow);
+}
+
+.flashcard-playlist-menu.is-hidden {
+    display: none;
+}
+
+.flashcard-playlist-menu__item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.flashcard-playlist-menu__name {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.flashcard-playlist-menu__item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.flashcard-playlist-menu__status {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.flashcard-playlist-menu__item.is-in-playlist .flashcard-playlist-menu__status {
+    color: #8ee99a;
+}
+
+.flashcard-playlist-menu__empty {
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--muted);
 }
 
 .flashcard__body {
@@ -831,7 +1189,7 @@ a {
 
 .flashcards-add {
     max-width: 520px;
-    margin: 0 auto;
+    margin: 0;
     padding: 16px 18px;
     border-radius: var(--radius-lg);
     background: var(--surface-panel-strong);
@@ -1292,6 +1650,25 @@ a {
     .song-page .lyrics-line-ru::before {
         content: "Russian translation";
         opacity: 0.75;
+    }
+
+    .flashcards-page {
+        --flashcards-sidebar-height: min(400px, calc(100dvh - 280px));
+    }
+
+    .flashcards-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .flashcards-sidebar {
+        width: 100%;
+        height: var(--flashcards-sidebar-height);
+        max-height: var(--flashcards-sidebar-height);
+        min-height: 0;
+    }
+
+    .flashcards-sidebar__playlists {
+        min-height: 0;
     }
 
     .flashcard__context,

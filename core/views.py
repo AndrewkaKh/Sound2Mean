@@ -18,11 +18,15 @@ from .services.flashcards import (
     get_deck_mode,
     get_deck_word_ids,
     get_user_word_ids,
+    is_playlist_deck,
     is_shuffle_enabled,
+    parse_playlist_id,
     reset_queue,
     set_deck_mode,
+    set_playlist_deck,
     toggle_shuffle,
 )
+from .services.playlists import build_playlists_payload, create_playlist, delete_playlist, import_playlist_by_code
 from .services.lyrics_service import consume_last_provider_error, get_song, parse_artist_title_query, search_candidates
 from .services.search_history import delete_user_query, get_recent_queries_for_user, save_user_query
 from .services.login_code import verify_code
@@ -339,6 +343,39 @@ def flashcards(request):
                     word_ids = get_deck_word_ids(user, deck_mode)
                     if word_ids:
                         advance_to_next(request, word_ids)
+        elif action == "create_playlist":
+            name = (request.POST.get("playlist_name") or "").strip()
+            if not name:
+                messages.error(request, "Введите название плейлиста.")
+            elif create_playlist(user, name) is None:
+                messages.error(request, "Не удалось создать плейлист. Возможно, такое название уже есть.")
+        elif action == "set_playlist_deck":
+            playlist_id = (request.POST.get("playlist_id") or "").strip()
+            if playlist_id.isdigit():
+                set_playlist_deck(request, int(playlist_id))
+                deck_mode = get_deck_mode(request)
+        elif action == "delete_playlist":
+            playlist_id = (request.POST.get("playlist_id") or "").strip()
+            if playlist_id.isdigit():
+                pid = int(playlist_id)
+                if delete_playlist(user, pid):
+                    if parse_playlist_id(deck_mode) == pid:
+                        set_deck_mode(request, DECK_ALL)
+                else:
+                    messages.error(request, "Не удалось удалить плейлист.")
+        elif action == "import_playlist":
+            code = (request.POST.get("playlist_code") or "").strip()
+            status, imported = import_playlist_by_code(user, code)
+            if status == "imported" and imported:
+                messages.success(request, f"Плейлист «{imported.name}» добавлен.")
+            elif status == "own" and imported:
+                messages.info(request, f"Это ваш плейлист «{imported.name}».")
+            elif status == "not_found":
+                messages.error(request, "Плейлист с таким кодом не найден.")
+            elif status == "invalid":
+                messages.error(request, "Введите код из 8 символов.")
+            else:
+                messages.error(request, "Не удалось добавить плейлист.")
 
         deck_mode = get_deck_mode(request)
 
@@ -348,6 +385,8 @@ def flashcards(request):
     total_count = len(get_user_word_ids(user))
     favorites_count = len(get_user_word_ids(user, favorites_only=True))
     shuffle_enabled = is_shuffle_enabled(request)
+    playlists = build_playlists_payload(user, word_id=current_id)
+    active_playlist_id = parse_playlist_id(deck_mode)
 
     return render(
         request,
@@ -362,6 +401,9 @@ def flashcards(request):
             "favorites_count": favorites_count,
             "shuffle_enabled": shuffle_enabled,
             "can_next": can_advance(word_ids),
+            "playlists": playlists,
+            "active_playlist_id": active_playlist_id,
+            "is_playlist_deck": is_playlist_deck(deck_mode),
         },
     )
 

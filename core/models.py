@@ -52,6 +52,59 @@ class VocabularyWord(models.Model):
         return f"{self.word_en} — {self.word_ru}"
 
 
+class WordPlaylist(models.Model):
+    user = models.ForeignKey(
+        TelegramUser,
+        on_delete=models.CASCADE,
+        related_name="word_playlists",
+    )
+    name = models.CharField(max_length=100)
+    share_code = models.CharField(max_length=12, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Word playlist"
+        verbose_name_plural = "Word playlists"
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "name"],
+                name="unique_playlist_name_per_user",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class WordPlaylistItem(models.Model):
+    playlist = models.ForeignKey(
+        WordPlaylist,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    word = models.ForeignKey(
+        VocabularyWord,
+        on_delete=models.CASCADE,
+        related_name="playlist_items",
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Word playlist item"
+        verbose_name_plural = "Word playlist items"
+        ordering = ["word__word_en", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["playlist", "word"],
+                name="unique_word_per_playlist",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.playlist.name}: {self.word.word_en}"
+
+
 class SearchHistory(models.Model):
     user = models.ForeignKey(
         TelegramUser,
